@@ -3,42 +3,38 @@ package config
 import (
 	"log"
 	"os"
-	"strconv" // برای تبدیل رشته به عدد (اگر شناسه کاربر عددی باشه)
-	"strings" // برای کار با رشته‌ها
+	"strconv"
+	"strings"
+	// "fmt" // اگر برای خطا در توکن لازم شد
 )
 
-// Config ساختاری برای نگهداری تمام تنظیمات برنامه است.
 type Config struct {
 	TelegramBotToken string
 	YTDLPPath        string
 	DownloadDir      string
-	AllowedUserIDs   []int64 // لیست شناسه‌های کاربری مجاز (اگر از این قابلیت استفاده می‌کنیم)
+	AllowedUserIDs   []int64
+	ForceJoinChannel string // <--- فیلد جدید برای کانال جوین اجباری
 }
 
-// Load تابع اصلی برای خواندن تنظیمات است.
-// این تابع تنظیمات را از متغیرهای محیطی می‌خواند.
 func Load() (*Config, error) {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if token == "" {
 		log.Println("WARNING: TELEGRAM_BOT_TOKEN environment variable not set.")
-		// در حالت واقعی شاید بخواهیم اینجا خطا برگردانیم و برنامه را متوقف کنیم
 		// return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN must be set")
 	}
 
 	ytDlpPath := os.Getenv("YTDLP_PATH")
 	if ytDlpPath == "" {
-		ytDlpPath = "yt-dlp" // مقدار پیش‌فرض اگر تنظیم نشده باشد
+		ytDlpPath = "yt-dlp"
 		log.Printf("YTDLP_PATH not set, using default: %s\n", ytDlpPath)
 	}
 
 	downloadDir := os.Getenv("DOWNLOAD_DIR")
 	if downloadDir == "" {
-		downloadDir = "temp_downloads" // مقدار پیش‌فرض
+		downloadDir = "temp_downloads"
 		log.Printf("DOWNLOAD_DIR not set, using default: %s\n", downloadDir)
 	}
 
-	// خواندن شناسه‌های کاربری مجاز (اختیاری)
-	// مثال: ALLOWED_USER_IDS="12345,67890"
 	var allowedUserIDs []int64
 	allowedUserIDsStr := os.Getenv("ALLOWED_USER_IDS")
 	if allowedUserIDsStr != "" {
@@ -56,10 +52,22 @@ func Load() (*Config, error) {
 		log.Println("ALLOWED_USER_IDS not set. Bot will be open to all (if no other checks are in place).")
 	}
 
+	forceJoinChannel := os.Getenv("FORCE_JOIN_CHANNEL") // <--- خواندن از متغیر محیطی
+	if forceJoinChannel != "" {
+		// برای اطمینان، اگر @ در ابتدا نبود، اضافه می‌کنیم (هرچند بهتره با @ تنظیم بشه)
+		if !strings.HasPrefix(forceJoinChannel, "@") {
+			forceJoinChannel = "@" + forceJoinChannel
+		}
+		log.Printf("Force join channel configured: %s\n", forceJoinChannel)
+	} else {
+		log.Println("FORCE_JOIN_CHANNEL not set. No mandatory channel join required.")
+	}
+
 	return &Config{
 		TelegramBotToken: token,
 		YTDLPPath:        ytDlpPath,
 		DownloadDir:      downloadDir,
 		AllowedUserIDs:   allowedUserIDs,
+		ForceJoinChannel: forceJoinChannel, // <--- اضافه کردن به ساختار خروجی
 	}, nil
 }

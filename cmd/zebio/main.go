@@ -6,7 +6,7 @@ import (
 
 	"github.com/Mohammad-Alipour/Zebio/internal/bot"
 	"github.com/Mohammad-Alipour/Zebio/internal/config"
-	"github.com/Mohammad-Alipour/Zebio/internal/downloader" // پکیج دانلودر رو اضافه می‌کنیم
+	"github.com/Mohammad-Alipour/Zebio/internal/downloader"
 )
 
 func main() {
@@ -29,11 +29,16 @@ func main() {
 	if len(cfg.AllowedUserIDs) > 0 {
 		log.Printf(" - Allowed User IDs: %v", cfg.AllowedUserIDs)
 	} else {
-		log.Println(" - No specific User IDs are restricted.")
+		log.Println(" - No specific User IDs are restricted by UserID list.")
+	}
+	if cfg.ForceJoinChannel != "" { // <--- لاگ کردن تنظیمات کانال
+		log.Printf(" - Mandatory Join Channel: %s", cfg.ForceJoinChannel)
+	} else {
+		log.Printf(" - No mandatory channel join is configured.")
 	}
 
 	log.Println("Initializing Downloader...")
-	downloaderService, err := downloader.New(cfg) // یک نمونه از دانلودر می‌سازیم
+	downloaderService, err := downloader.New(cfg)
 	if err != nil {
 		log.Printf("Error initializing Downloader: %v", err)
 		os.Exit(1)
@@ -41,7 +46,6 @@ func main() {
 	log.Println("Downloader initialized successfully.")
 
 	log.Println("Initializing Telegram bot...")
-	// تابع New در پکیج bot رو تغییر خواهیم داد تا downloaderService رو هم به عنوان ورودی بگیره
 	telegramBot, err := bot.New(cfg, downloaderService)
 	if err != nil {
 		log.Printf("Error initializing Telegram bot: %v", err)

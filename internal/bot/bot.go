@@ -35,6 +35,56 @@ func New(cfg *config.Config, dl *downloader.Downloader) (*Bot, error) {
 	}, nil
 }
 
+func (b *Bot) isUserMemberOfRequiredChannel(userID int64) (bool, string, error) {
+	if b.cfg.ForceJoinChannel == "" {
+		return true, "", nil
+	}
+
+	channelUsername := b.cfg.ForceJoinChannel
+
+	chatMemberConfig := tgbotapi.GetChatMemberConfig{
+		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+			SuperGroupUsername: channelUsername,
+			UserID:             userID,
+		},
+	}
+	member, err := b.api.GetChatMember(chatMemberConfig)
+	if err != nil {
+		if apiErr, ok := err.(tgbotapi.Error); ok && (strings.Contains(strings.ToLower(apiErr.Message), "user not found") || strings.Contains(strings.ToLower(apiErr.Message), "member not found")) {
+			log.Printf("User %d not found in channel %s (implies not a member)", userID, channelUsername)
+			return false, channelUsername, nil
+		}
+		log.Printf("Error checking chat member status for user %d in channel %s: %v", userID, channelUsername, err)
+		return false, channelUsername, err
+	}
+
+	switch member.Status {
+	case "creator", "administrator", "member":
+		return true, channelUsername, nil
+	default:
+		log.Printf("User %d has status '%s' in channel %s (not considered a member for usage).", userID, member.Status, channelUsername)
+		return false, channelUsername, nil
+	}
+}
+
+func (b *Bot) sendJoinChannelMessage(chatID int64, channelUsername string, replyToMessageID int) {
+	channelLink := "https://t.me/" + strings.TrimPrefix(channelUsername, "@")
+	replyText := fmt.Sprintf("⚠️ برای استفاده از امکانات ربات، لطفاً ابتدا در کانال ما عضو شوید:\n%s\n\nپس از عضویت، دوباره دستور خود را ارسال کنید یا /start را بزنید.", channelLink)
+
+	reply := tgbotapi.NewMessage(chatID, replyText)
+	if replyToMessageID != 0 {
+		reply.ReplyToMessageID = replyToMessageID
+	}
+
+	joinButton := tgbotapi.NewInlineKeyboardButtonURL("عضویت در کانال 🚀", channelLink)
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(joinButton))
+	reply.ReplyMarkup = keyboard
+
+	if _, err := b.api.Send(reply); err != nil {
+		log.Printf("Error sending 'please join channel' message to chat %d: %v", chatID, err)
+	}
+}
+
 func (b *Bot) Start() {
 	log.Println("Bot is starting to listen for updates...")
 	u := tgbotapi.NewUpdate(0)
@@ -42,9 +92,11 @@ func (b *Bot) Start() {
 	updates := b.api.GetUpdatesChan(u)
 
 	for update := range updates {
-		userID := int64(0)
-		userName := "UnknownUser"
+		var userID int64
+		var userName string
 		var chatID int64
+		var messageID int = 0 // ID of the user's message, if applicable
+		var isCallback bool = false
 
 		if update.Message != nil {
 			message := update.Message
@@ -54,41 +106,83 @@ func (b *Bot) Start() {
 				userName = message.From.FirstName
 			}
 			chatID = message.Chat.ID
+			messageID = message.MessageID
 			log.Printf("[%s (%d)] Received message: %s\n", userName, userID, message.Text)
-
-			if len(b.cfg.AllowedUserIDs) > 0 {
-				isAllowed := false
-				for _, allowedID := range b.cfg.AllowedUserIDs {
-					if userID == allowedID {
-						isAllowed = true
-						break
-					}
-				}
-				if !isAllowed {
-					log.Printf("User %s (%d) is not allowed. Ignoring message.", userName, userID)
-					reply := tgbotapi.NewMessage(chatID, "متاسفم، شما اجازه استفاده از این ربات را ندارید.")
-					b.api.Send(reply)
-					continue
-				}
-			}
-
-			if message.IsCommand() {
-				b.handleCommand(message)
-			} else if message.Text != "" {
-				b.handleLink(message, userName, userID)
-			} else {
-				log.Printf("[%s (%d)] Received non-text, non-command message. Ignoring.", userName, userID)
-			}
-
 		} else if update.CallbackQuery != nil {
+			isCallback = true
 			callback := update.CallbackQuery
 			userID = callback.From.ID
 			userName = callback.From.UserName
 			if userName == "" {
 				userName = callback.From.FirstName
 			}
-			log.Printf("[%s (%d)] Received callback query data: %s\n", userName, userID, callback.Data)
-			b.handleCallbackQuery(callback, userName, userID)
+			chatID = callback.Message.Chat.ID
+			// For callbacks, the relevant message to reply to (if needed for context) might be callback.Message.ReplyToMessage
+			if callback.Message.ReplyToMessage != nil {
+				messageID = callback.Message.ReplyToMessage.MessageID
+			} else {
+				messageID = callback.Message.MessageID // Fallback to the message with buttons
+			}
+			log.Printf("[%s (%d)] Received callback query data: %s from message %d\n", userName, userID, callback.Data, callback.Message.MessageID)
+		} else {
+			continue
+		}
+
+		if b.cfg.ForceJoinChannel != "" {
+			isMember, channelToJoin, err := b.isUserMemberOfRequiredChannel(userID)
+			if err != nil {
+				log.Printf("Error during channel membership check for user %d: %v. Sending error message.", userID, err)
+				reply := tgbotapi.NewMessage(chatID, "خطا در بررسی عضویت کانال. لطفاً لحظاتی دیگر دوباره امتحان کنید.")
+				if messageID != 0 && !isCallback { // Only reply to original message if it's not a callback's inline message
+					reply.ReplyToMessageID = messageID
+				}
+				b.api.Send(reply)
+				continue
+			}
+			if !isMember {
+				log.Printf("User %d (%s) is not a member of %s. Requesting join.", userID, userName, channelToJoin)
+				// If it's a callback, we might not want to reply to the original link message,
+				// but rather send a new message or edit the inline message.
+				// For simplicity now, just send a new message.
+				// The messageID passed to sendJoinChannelMessage should be the original user message if available
+				b.sendJoinChannelMessage(chatID, channelToJoin, messageID)
+				if isCallback { // Answer callback even if denying access
+					b.api.Send(tgbotapi.NewCallback(update.CallbackQuery.ID, "لطفا ابتدا در کانال عضو شوید."))
+				}
+				continue
+			}
+		}
+
+		if len(b.cfg.AllowedUserIDs) > 0 {
+			isAllowed := false
+			for _, allowedID := range b.cfg.AllowedUserIDs {
+				if userID == allowedID {
+					isAllowed = true
+					break
+				}
+			}
+			if !isAllowed {
+				log.Printf("User %s (%d) is not in AllowedUserIDs list. Ignoring.", userName, userID)
+				reply := tgbotapi.NewMessage(chatID, "متاسفم، شما اجازه استفاده از این ربات را ندارید.")
+				if messageID != 0 && !isCallback {
+					reply.ReplyToMessageID = messageID
+				}
+				b.api.Send(reply)
+				if isCallback {
+					b.api.Send(tgbotapi.NewCallback(update.CallbackQuery.ID, "شما مجاز نیستید."))
+				}
+				continue
+			}
+		}
+
+		if isCallback {
+			b.handleCallbackQuery(update.CallbackQuery, userName, userID)
+		} else if update.Message.IsCommand() {
+			b.handleCommand(update.Message)
+		} else if update.Message.Text != "" {
+			b.handleLink(update.Message, userName, userID)
+		} else {
+			log.Printf("[%s (%d)] Received non-text, non-command message. Ignoring.", userName, userID)
 		}
 	}
 }
@@ -189,10 +283,21 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 	userIdentifier := userName + "_" + strconv.FormatInt(userID, 10)
 
 	originalLinkMessageID := 0
+	var originalLinkURL string
+
 	if callback.Message.ReplyToMessage != nil {
 		originalLinkMessageID = callback.Message.ReplyToMessage.MessageID
+		originalLinkURL = callback.Message.ReplyToMessage.Text
 	} else {
-		log.Printf("[%s] Callback query message does not have ReplyToMessage. Cannot determine original link message ID easily.", userIdentifier)
+		log.Printf("[%s] Callback query message does not have ReplyToMessage. Cannot determine original link.", userIdentifier)
+		b.api.Send(tgbotapi.NewMessage(chatID, "خطای داخلی: اطلاعات لینک اصلی برای پردازش درخواست شما یافت نشد."))
+		return
+	}
+
+	if originalLinkURL == "" {
+		log.Printf("[%s] Original link URL is empty from ReplyToMessage.", userIdentifier)
+		b.api.Send(tgbotapi.NewMessage(chatID, "خطای داخلی: لینک اصلی برای دانلود خالی است."))
+		return
 	}
 
 	deleteChoiceMsg := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
@@ -208,13 +313,6 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 	}
 	chosenTypeStr := parts[1]
 
-	if callback.Message.ReplyToMessage == nil || callback.Message.ReplyToMessage.Text == "" {
-		log.Printf("[%s] Could not retrieve original link from ReplyToMessage for callback.\n", userIdentifier)
-		b.api.Send(tgbotapi.NewMessage(chatID, "خطای داخلی: لینک اصلی پیدا نشد."))
-		return
-	}
-	urlToDownload := callback.Message.ReplyToMessage.Text
-
 	var dlType downloader.DownloadType
 	switch chosenTypeStr {
 	case "audio":
@@ -227,11 +325,11 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 		return
 	}
 
-	log.Printf("[%s] User chose %s for URL: %s (Original MsgID: %d)\n", userIdentifier, chosenTypeStr, urlToDownload, originalLinkMessageID)
+	log.Printf("[%s] User chose %s for URL: %s (Original MsgID: %d)\n", userIdentifier, chosenTypeStr, originalLinkURL, originalLinkMessageID)
 
-	trackInfo, err := b.downloader.GetTrackInfo(urlToDownload, userIdentifier)
+	trackInfo, err := b.downloader.GetTrackInfo(originalLinkURL, userIdentifier)
 	if err != nil {
-		log.Printf("[%s] Error re-fetching track info for URL %s: %v\n", userIdentifier, urlToDownload, err)
+		log.Printf("[%s] Error re-fetching track info for URL %s: %v\n", userIdentifier, originalLinkURL, err)
 		errorMsgText := fmt.Sprintf("متاسفانه در دریافت مجدد اطلاعات از لینک مشکلی پیش آمد.\nخطا: %s", err.Error())
 		errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
 		if originalLinkMessageID != 0 {
@@ -241,7 +339,7 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 		return
 	}
 
-	b.processDownloadRequest(chatID, originalLinkMessageID, urlToDownload, dlType, trackInfo, userName, userID)
+	b.processDownloadRequest(chatID, originalLinkMessageID, originalLinkURL, dlType, trackInfo, userName, userID)
 }
 
 func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, urlToDownload string, dlType downloader.DownloadType, trackInfo *downloader.TrackInfo, userName string, userID int64) {
