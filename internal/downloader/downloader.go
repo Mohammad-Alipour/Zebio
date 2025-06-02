@@ -14,6 +14,13 @@ import (
 	"github.com/Mohammad-Alipour/Zebio/internal/config"
 )
 
+type DownloadType int
+
+const (
+	AudioOnly DownloadType = iota
+	VideoBest
+)
+
 type Downloader struct {
 	ytDLPPath   string
 	downloadDir string
@@ -23,6 +30,11 @@ type TrackInfo struct {
 	Title        string
 	Artist       string
 	ThumbnailURL string
+	Extension    string
+	Filename     string
+	OriginalURL  string
+	IsAudioOnly  bool
+	IsVideo      bool
 }
 
 func New(cfg *config.Config) (*Downloader, error) {
@@ -62,11 +74,17 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 	}
 
 	var data struct {
-		Title     string `json:"title"`
-		Artist    string `json:"artist"`
-		Creator   string `json:"creator"`
-		Uploader  string `json:"uploader"`
-		Thumbnail string `json:"thumbnail"`
+		ID         string `json:"id"`
+		Title      string `json:"title"`
+		Artist     string `json:"artist"`
+		Creator    string `json:"creator"`
+		Uploader   string `json:"uploader"`
+		Thumbnail  string `json:"thumbnail"`
+		Ext        string `json:"ext"`
+		Acodec     string `json:"acodec"`
+		Vcodec     string `json:"vcodec"`
+		Filename   string `json:"_filename"`
+		WebpageURL string `json:"webpage_url"`
 	}
 
 	if err := json.Unmarshal(jsonData.Bytes(), &data); err != nil {
@@ -77,6 +95,9 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		Title:        data.Title,
 		Artist:       data.Artist,
 		ThumbnailURL: data.Thumbnail,
+		Extension:    data.Ext,
+		Filename:     data.Filename,
+		OriginalURL:  data.WebpageURL,
 	}
 
 	if info.Artist == "" {
@@ -90,31 +111,84 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		info.Artist = "Unknown Artist"
 	}
 	if info.Title == "" {
-		info.Title = "Unknown Title"
+		if data.ID != "" {
+			info.Title = data.ID
+		} else {
+			info.Title = "Unknown Title"
+		}
 	}
 
-	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', Thumbnail: '%s'\n", username, info.Title, info.Artist, info.ThumbnailURL)
+	if data.Vcodec != "none" && data.Vcodec != "" {
+		info.IsVideo = true
+		info.IsAudioOnly = false
+	} else if data.Acodec != "none" && data.Acodec != "" {
+		info.IsAudioOnly = true
+		info.IsVideo = false
+	} else {
+		info.IsAudioOnly = false
+		info.IsVideo = false
+	}
+
+	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', Ext: '%s', IsVideo: %t, IsAudioOnly: %t\n", username, info.Title, info.Artist, info.Extension, info.IsVideo, info.IsAudioOnly)
 	return info, nil
 }
 
-func (d *Downloader) DownloadAudio(urlStr string, username string, info *TrackInfo) (string, error) {
-	log.Printf("[%s] Starting audio download for URL: %s (Title: %s)\n", username, urlStr, info.Title)
+func (d *Downloader) DownloadMedia(urlStr string, username string, prefType DownloadType, info *TrackInfo) (string, string, error) {
+	log.Printf("[%s] Starting download for URL: %s (Title: %s, Preferred Type: %v)\n", username, urlStr, info.Title, prefType)
 	start := time.Now()
 
-	fileName := fmt.Sprintf("%s - %s.mp3", info.Artist, info.Title)
-	outputTemplate := filepath.Join(d.downloadDir, fileName)
+	var cmdArgs []string
+	var determinedExtension string
 
-	cmdArgs := []string{
-		"-v",
-		"--no-playlist",
-		"-f", "bestaudio/best",
-		"--extract-audio",
-		"--audio-format", "mp3",
-		"--restrict-filenames",
-		"--embed-thumbnail",
-		"-o", outputTemplate,
-		urlStr,
+	outputFilename := fmt.Sprintf("%s - %s", info.Artist, info.Title)
+	outputTemplateBase := filepath.Join(d.downloadDir, outputFilename)
+
+	switch prefType {
+	case AudioOnly:
+		determinedExtension = "mp3"
+		cmdArgs = []string{
+			"-v",
+			"--no-playlist",
+			"-f", "bestaudio/best",
+			"--extract-audio",
+			"--audio-format", determinedExtension,
+			"--restrict-filenames",
+			"--embed-thumbnail",
+			"-o", outputTemplateBase + ".%(ext)s",
+			urlStr,
+		}
+	case VideoBest:
+		if info.IsAudioOnly {
+			log.Printf("[%s] User requested video, but content is audio-only. Downloading as audio.\n", username)
+			determinedExtension = "mp3"
+			cmdArgs = []string{
+				"-v",
+				"--no-playlist",
+				"-f", "bestaudio/best",
+				"--extract-audio",
+				"--audio-format", determinedExtension,
+				"--restrict-filenames",
+				"--embed-thumbnail",
+				"-o", outputTemplateBase + ".%(ext)s",
+				urlStr,
+			}
+		} else {
+			determinedExtension = "mp4"
+			cmdArgs = []string{
+				"-v",
+				"--no-playlist",
+				"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+				"--merge-output-format", "mp4",
+				"--restrict-filenames",
+				"--embed-thumbnail",
+				"-o", outputTemplateBase + ".%(ext)s",
+				urlStr,
+			}
+		}
+	default:
+		return "", "", fmt.Errorf("[%s] unknown download type requested", username)
 	}
+
 	cmd := exec.Command(d.ytDLPPath, cmdArgs...)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -122,7 +196,6 @@ func (d *Downloader) DownloadAudio(urlStr string, username string, info *TrackIn
 	cmd.Stderr = &stderrBuf
 
 	log.Printf("[%s] Executing yt-dlp download command: %s\n", username, strings.Join(cmd.Args, " "))
-
 	err := cmd.Run()
 
 	if stdoutBuf.Len() > 0 {
@@ -133,56 +206,58 @@ func (d *Downloader) DownloadAudio(urlStr string, username string, info *TrackIn
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("[%s] yt-dlp download execution failed: %w. STDERR: %s", username, err, stderrBuf.String())
+		return "", "", fmt.Errorf("[%s] yt-dlp download execution failed: %w. STDERR: %s", username, err, stderrBuf.String())
 	}
 
-	finalFilePath := outputTemplate
-	if _, statErr := os.Stat(finalFilePath); os.IsNotExist(statErr) {
-		log.Printf("[%s] File '%s' not found directly. Trying to find latest MP3.\n", username, finalFilePath)
-		foundPath, findErr := findLatestMP3(d.downloadDir, username)
-		if findErr != nil {
-			return "", fmt.Errorf("[%s] yt-dlp ran but downloaded file could not be found: %w", username, findErr)
-		}
-		finalFilePath = foundPath
+	actualFilename, findErr := findDownloadedFile(d.downloadDir, outputFilename, username)
+	if findErr != nil {
+		return "", "", fmt.Errorf("[%s] yt-dlp ran but downloaded file could not be reliably found (basename: %s): %w", username, outputFilename, findErr)
 	}
+
+	detectedExt := strings.TrimPrefix(filepath.Ext(actualFilename), ".")
 
 	elapsed := time.Since(start)
-	log.Printf("[%s] Audio download and processing for %s finished in %s. File: %s\n", username, urlStr, elapsed, finalFilePath)
-	return finalFilePath, nil
+	log.Printf("[%s] Download and processing for %s finished in %s. File: %s, Actual Ext: %s\n", username, urlStr, elapsed, actualFilename, detectedExt)
+	return actualFilename, detectedExt, nil
 }
 
-func findLatestMP3(dir, username string) (string, error) {
-	log.Printf("[%s] findLatestMP3: Scanning directory '%s' for .mp3 files\n", username, dir)
-	files, err := os.ReadDir(dir)
+func findDownloadedFile(dir, baseName, username string) (string, error) {
+	log.Printf("[%s] findDownloadedFile: Scanning directory '%s' for files starting with '%s'\n", username, dir, baseName)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory %s: %w", dir, err)
 	}
+
 	var latestFile string
 	var latestModTime time.Time
-	foundOne := false
-	for _, entry := range files {
-		if entry.IsDir() {
-			continue
-		}
-		fileName := entry.Name()
-		if strings.HasSuffix(strings.ToLower(fileName), ".mp3") {
-			filePath := filepath.Join(dir, fileName)
+	var fileMatched bool = false
+	var foundFiles []string
+
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), baseName) {
+			filePath := filepath.Join(dir, entry.Name())
 			info, statErr := os.Stat(filePath)
 			if statErr != nil {
-				log.Printf("[%s] findLatestMP3: Stat failed for %s: %v. Skipping.\n", username, filePath, statErr)
+				log.Printf("[%s] findDownloadedFile: Stat failed for %s: %v. Skipping.\n", username, filePath, statErr)
 				continue
 			}
-			log.Printf("[%s] findLatestMP3: Found MP3: %s, ModTime: %s\n", username, filePath, info.ModTime())
-			if !foundOne || info.ModTime().After(latestModTime) {
+			if !fileMatched || info.ModTime().After(latestModTime) {
 				latestModTime = info.ModTime()
 				latestFile = filePath
-				foundOne = true
+				fileMatched = true
 			}
+			foundFiles = append(foundFiles, filePath)
 		}
 	}
-	if !foundOne {
-		return "", fmt.Errorf("no .mp3 file found in directory %s after download", dir)
+
+	if !fileMatched {
+		return "", fmt.Errorf("no file found starting with basename '%s' in directory '%s'", baseName, dir)
 	}
-	log.Printf("[%s] findLatestMP3: Latest MP3 file selected: %s\n", username, latestFile)
+
+	if len(foundFiles) > 1 {
+		log.Printf("[%s] Warning: Multiple files found starting with basename '%s': %v. Selected latest: %s\n", username, baseName, foundFiles, latestFile)
+	}
+
+	log.Printf("[%s] findDownloadedFile: File selected: %s\n", username, latestFile)
 	return latestFile, nil
 }
