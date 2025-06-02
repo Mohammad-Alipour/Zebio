@@ -181,7 +181,7 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 	audioFile.ReplyToMessageID = message.MessageID
 	audioFile.Title = trackInfo.Title
 	audioFile.Performer = trackInfo.Artist
-	audioFile.Caption = fmt.Sprintf("🎵 %s\n👤 %s\n\n#ZebioBot", trackInfo.Title, trackInfo.Artist) // Simplified caption
+	audioFile.Caption = fmt.Sprintf("🎵 %s\n👤 %s\n\n@Zebio_bot", trackInfo.Title, trackInfo.Artist)
 
 	if _, err := b.api.Send(audioFile); err != nil {
 		log.Printf("[%s] Error sending audio file %s: %v\n", userIdentifier, downloadedFilePath, err)
