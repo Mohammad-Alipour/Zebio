@@ -1,62 +1,61 @@
 package bot
 
 import (
+	"fmt"
 	"log"
-	// مسیر پکیج config شما
-	"github.com/Mohammad-Alipour/Zebio/internal/config" // اگر نام ماژول متفاوت است، تغییر دهید
+	"os"
+	"strconv"
+
+	"github.com/Mohammad-Alipour/Zebio/internal/config"
+	"github.com/Mohammad-Alipour/Zebio/internal/downloader"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Bot ساختاری برای نگهداری نمونه API ربات و تنظیمات است.
 type Bot struct {
-	api *tgbotapi.BotAPI
-	cfg *config.Config
+	api        *tgbotapi.BotAPI
+	cfg        *config.Config
+	downloader *downloader.Downloader
 }
 
-// New یک نمونه جدید از Bot ایجاد و برمی‌گرداند.
-// این تابع سعی می‌کند به API تلگرام متصل شود.
-func New(cfg *config.Config) (*Bot, error) {
+func New(cfg *config.Config, dl *downloader.Downloader) (*Bot, error) {
 	if cfg.TelegramBotToken == "" {
 		log.Fatal("Telegram Bot Token is not configured. Cannot start bot.")
-		// در واقعیت، چون config.Load باید این را چک می‌کرد، اینجا نباید برسیم
-		// اما بررسی مجدد ضرری ندارد.
 	}
 
 	api, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
 	if err != nil {
-		return nil, err // برگرداندن خطا اگر اتصال ناموفق بود
+		return nil, fmt.Errorf("failed to create new Bot API: %w", err)
 	}
-
-	// (اختیاری) فعال کردن حالت دیباگ برای دیدن درخواست‌ها و پاسخ‌های API
-	// api.Debug = true
 
 	log.Printf("Authorized on account %s (@%s)\n", api.Self.FirstName, api.Self.UserName)
 
 	return &Bot{
-		api: api,
-		cfg: cfg,
+		api:        api,
+		cfg:        cfg,
+		downloader: dl,
 	}, nil
 }
 
-// Start شروع به گوش دادن به پیام‌ها و دستورات می‌کند.
-// این تابع به صورت یک حلقه بی‌نهایت اجرا می‌شود تا زمانی که برنامه متوقف شود.
 func (b *Bot) Start() {
 	log.Println("Bot is starting to listen for updates...")
-	u := tgbotapi.NewUpdate(0) // 0 یعنی از آخرین آپدیت شروع کن
-	u.Timeout = 60             // Timeout ۶۰ ثانیه‌ای برای دریافت آپدیت‌ها
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
 
 	updates := b.api.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message == nil { // اگر آپدیت پیام نبود، نادیده بگیر
+		if update.Message == nil {
 			continue
 		}
 
 		userID := update.Message.From.ID
-		log.Printf("[%s (%d)] %s\n", update.Message.From.UserName, userID, update.Message.Text)
+		userName := update.Message.From.UserName
+		if userName == "" {
+			userName = update.Message.From.FirstName
+		}
+		log.Printf("[%s (%d)] Received message: %s\n", userName, userID, update.Message.Text)
 
-		// بررسی اینکه آیا کاربر مجاز است (اگر لیست کاربران مجاز تعریف شده باشد)
 		if len(b.cfg.AllowedUserIDs) > 0 {
 			isAllowed := false
 			for _, allowedID := range b.cfg.AllowedUserIDs {
@@ -66,39 +65,98 @@ func (b *Bot) Start() {
 				}
 			}
 			if !isAllowed {
-				log.Printf("User %s (%d) is not allowed. Ignoring message.", update.Message.From.UserName, userID)
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "متاسفم، شما اجازه استفاده از این ربات را ندارید.")
-				b.api.Send(msg)
+				log.Printf("User %s (%d) is not allowed. Ignoring message.", userName, userID)
+				reply := tgbotapi.NewMessage(update.Message.Chat.ID, "متاسفم، شما اجازه استفاده از این ربات را ندارید.")
+				b.api.Send(reply)
 				continue
 			}
 		}
 
-		// پاسخ ساده به دستور /start
 		if update.Message.IsCommand() {
-			switch update.Message.Command() {
-			case "start":
-				msgText := "سلام " + update.Message.From.FirstName + "! 👋\n"
-				msgText += "من ربات دانلودر شما هستم. لینک خود را برای دانلود ارسال کنید."
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, msgText)
-				msg.ReplyToMessageID = update.Message.MessageID
-				if _, err := b.api.Send(msg); err != nil {
-					log.Printf("Error sending message: %v", err)
-				}
-			default:
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "دستور شناخته نشد.")
-				if _, err := b.api.Send(msg); err != nil {
-					log.Printf("Error sending message: %v", err)
-				}
-			}
+			b.handleCommand(update.Message)
+		} else if update.Message.Text != "" {
+			b.handleLink(update.Message)
 		} else {
-			// فعلاً برای پیام‌های غیر دستوری (که انتظار داریم لینک باشن)
-			// فقط یک پاسخ موقت میدیم. در مراحل بعد این قسمت تکمیل میشه.
-			responseText := "لینک دریافت شد: " + update.Message.Text + "\n"
-			responseText += "در حال حاضر قابلیت دانلود پیاده‌سازی نشده است."
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, responseText)
-			if _, err := b.api.Send(msg); err != nil {
-				log.Printf("Error sending message: %v", err)
-			}
+			log.Printf("[%s (%d)] Received non-text, non-command message. Ignoring.", userName, userID)
 		}
+	}
+}
+
+func (b *Bot) handleCommand(message *tgbotapi.Message) {
+	userName := message.From.UserName
+	if userName == "" {
+		userName = message.From.FirstName
+	}
+	command := message.Command()
+	log.Printf("[%s (%d)] Received command: /%s\n", userName, message.From.ID, command)
+
+	var msgText string
+	switch command {
+	case "start":
+		msgText = "سلام " + message.From.FirstName + "! 👋\n"
+		msgText += "من ربات دانلودر شما هستم. لینک خود را برای دانلود ارسال کنید."
+	default:
+		msgText = "دستور شناخته نشد."
+	}
+	reply := tgbotapi.NewMessage(message.Chat.ID, msgText)
+	reply.ReplyToMessageID = message.MessageID
+	if _, err := b.api.Send(reply); err != nil {
+		log.Printf("[%s (%d)] Error sending command reply: %v", userName, message.From.ID, err)
+	}
+}
+
+func (b *Bot) handleLink(message *tgbotapi.Message) {
+	chatID := message.Chat.ID
+	userID := message.From.ID
+	userName := message.From.UserName
+	if userName == "" {
+		userName = message.From.FirstName
+	}
+	urlToDownload := message.Text
+
+	log.Printf("[%s (%d)] Received link to process: %s\n", userName, userID, urlToDownload)
+
+	processingMsg := tgbotapi.NewMessage(chatID, "در حال پردازش لینک شما... لطفاً کمی صبر کنید. ⏳")
+	processingMsg.ReplyToMessageID = message.MessageID
+	if _, err := b.api.Send(processingMsg); err != nil {
+		log.Printf("[%s (%d)] Error sending 'processing' message: %v", userName, userID, err)
+	}
+
+	downloadedFilePath, err := b.downloader.DownloadAudio(urlToDownload, userName+"_"+strconv.FormatInt(userID, 10))
+	if err != nil {
+		log.Printf("[%s (%d)] Error downloading audio for URL %s: %v\n", userName, userID, urlToDownload, err)
+		errorMsgText := fmt.Sprintf("متاسفانه در دانلود از لینک مشکلی پیش آمد.\nخطا: %s", err.Error())
+		errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
+		errMsg.ReplyToMessageID = message.MessageID
+		b.api.Send(errMsg)
+		return
+	}
+
+	log.Printf("[%s (%d)] File downloaded successfully: %s. Attempting to send.\n", userName, userID, downloadedFilePath)
+
+	sendingMsg := tgbotapi.NewMessage(chatID, "فایل صوتی با موفقیت دانلود شد. در حال ارسال... 📤")
+	sendingMsg.ReplyToMessageID = message.MessageID
+	b.api.Send(sendingMsg)
+
+	audioFile := tgbotapi.NewAudio(chatID, tgbotapi.FilePath(downloadedFilePath))
+	audioFile.ReplyToMessageID = message.MessageID
+	// audioFile.Title = "Downloaded Audio" // می‌توانید عنوان هم برای فایل صوتی بگذارید
+	// audioFile.Performer = "Zebio Bot"   // یا نام اجراکننده
+
+	if _, err := b.api.Send(audioFile); err != nil {
+		log.Printf("[%s (%d)] Error sending audio file %s: %v\n", userName, userID, downloadedFilePath, err)
+		errorMsgText := fmt.Sprintf("فایل دانلود شد اما در ارسال آن مشکلی پیش آمد.\nخطا: %s", err.Error())
+		errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
+		b.api.Send(errMsg)
+	} else {
+		log.Printf("[%s (%d)] Audio file %s sent successfully.\n", userName, userID, downloadedFilePath)
+	}
+
+	log.Printf("[%s (%d)] Attempting to remove temporary file: %s\n", userName, userID, downloadedFilePath)
+	errRemove := os.Remove(downloadedFilePath)
+	if errRemove != nil {
+		log.Printf("[%s (%d)] Error removing temporary file %s: %v\n", userName, userID, downloadedFilePath, errRemove)
+	} else {
+		log.Printf("[%s (%d)] Temporary file %s removed successfully.\n", userName, userID, downloadedFilePath)
 	}
 }

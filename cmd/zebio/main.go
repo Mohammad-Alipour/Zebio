@@ -4,9 +4,9 @@ import (
 	"log"
 	"os"
 
-	// مسیر صحیح به پکیج‌های داخلی شما
-	"github.com/Mohammad-Alipour/Zebio/internal/bot" // پکیج ربات رو اضافه می‌کنیم
+	"github.com/Mohammad-Alipour/Zebio/internal/bot"
 	"github.com/Mohammad-Alipour/Zebio/internal/config"
+	"github.com/Mohammad-Alipour/Zebio/internal/downloader" // پکیج دانلودر رو اضافه می‌کنیم
 )
 
 func main() {
@@ -22,9 +22,9 @@ func main() {
 	log.Printf(" - Download Dir: %s", cfg.DownloadDir)
 	if cfg.TelegramBotToken == "" {
 		log.Println("CRITICAL: Telegram Bot Token is not set in configuration! Exiting.")
-		os.Exit(1) // اگر توکن نباشد، برنامه باید خارج شود
+		os.Exit(1)
 	} else {
-		log.Println("Telegram Bot Token is set.") // طول توکن را دیگر اینجا چاپ نمی‌کنیم
+		log.Println("Telegram Bot Token is set.")
 	}
 	if len(cfg.AllowedUserIDs) > 0 {
 		log.Printf(" - Allowed User IDs: %v", cfg.AllowedUserIDs)
@@ -32,21 +32,24 @@ func main() {
 		log.Println(" - No specific User IDs are restricted.")
 	}
 
-	// 2. راه‌اندازی و اجرای ربات تلگرام
+	log.Println("Initializing Downloader...")
+	downloaderService, err := downloader.New(cfg) // یک نمونه از دانلودر می‌سازیم
+	if err != nil {
+		log.Printf("Error initializing Downloader: %v", err)
+		os.Exit(1)
+	}
+	log.Println("Downloader initialized successfully.")
+
 	log.Println("Initializing Telegram bot...")
-	telegramBot, err := bot.New(cfg) // نمونه ربات را می‌سازیم
+	// تابع New در پکیج bot رو تغییر خواهیم داد تا downloaderService رو هم به عنوان ورودی بگیره
+	telegramBot, err := bot.New(cfg, downloaderService)
 	if err != nil {
 		log.Printf("Error initializing Telegram bot: %v", err)
 		os.Exit(1)
 	}
 
-	// 3. (قدم‌های بعدی) آماده‌سازی دانلودر با استفاده از cfg.YTDLPPath و cfg.DownloadDir
-	log.Println("Downloader initialization is a placeholder for now.")
-	// downloaderService := downloader.New(cfg) // چیزی شبیه این
-
 	log.Println("Application setup complete. Starting Telegram bot polling...")
-	// این تابع برنامه را در حال اجرا نگه می‌دارد و به پیام‌ها گوش می‌دهد
 	telegramBot.Start()
 
-	log.Println("Bot has stopped.") // این خط معمولاً اجرا نمی‌شود مگر اینکه Start() خاتمه یابد
+	log.Println("Bot has stopped.")
 }
