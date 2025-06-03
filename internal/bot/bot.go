@@ -214,16 +214,13 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, fromFirstName string) {
 
 	var msgText string
 	escapedFirstName := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, fromFirstName)
-	// Using b.api.Self.FirstName for bot's display name, assuming it's safe or simple.
-	// If bot's own name could have special characters, it should also be escaped.
-	// Let's escape it for safety, though typically bot first names are simple.
 	escapedBotDisplayName := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, b.api.Self.FirstName)
 
 	switch command {
 	case "start":
-		msgText = fmt.Sprintf("سلام *%s* عزیز! 👋\n\nبه ربات دانلودر *%s* خوش اومدی.\nمن می‌تونم از لینک‌هایی که می‌فرستی (مثل یوتیوب، ساندکلود، اینستاگرام و...) برات فایل صوتی یا ویدیویی دانلود کنم.\n\n🔗 کافیه لینک مورد نظرت رو برام ارسال کنی!\n\nراهنمایی بیشتر: /help", escapedFirstName, escapedBotDisplayName)
+		msgText = fmt.Sprintf("سلام *%s* عزیز\\! 👋\n\nبه ربات دانلودر *%s* خوش اومدی.\nمن می‌تونم از لینک‌هایی که می‌فرستی (مثل یوتیوب، ساندکلود، اینستاگرام و...) برات فایل صوتی یا ویدیویی دانلود کنم.\n\n🔗 کافیه لینک مورد نظرت رو برام ارسال کنی\\!\n\nراهنمایی بیشتر: /help", escapedFirstName, escapedBotDisplayName)
 	case "help":
-		msgText = fmt.Sprintf("راهنمای استفاده از ربات *%s* 🤖\n\n۱. لینک مستقیم از پلتفرم‌هایی مثل:\n   یوتیوب 🔴\n   ساندکلود 🟠\n   اینستاگرام 🟣\n   و ... رو برای من ارسال کن.\n\n۲. اگر محتوای لینک هم صوتی و هم تصویری باشه، ازت می‌پرسم که کدوم رو می‌خوای برات دانلود کنم:\n   🎵 *صدا* (فایل MP3 با کاور)\n   🎬 *ویدیو* (فایل MP4)\n\n۳. بعد از انتخاب، فایل رو برات آماده و ارسال می‌کنم!", escapedBotDisplayName)
+		msgText = fmt.Sprintf("راهنمای استفاده از ربات *%s* 🤖\n\n۱. لینک مستقیم از پلتفرم‌هایی مثل:\n   یوتیوب 🔴\n   ساندکلود 🟠\n   اینستاگرام 🟣\n   و ... رو برای من ارسال کن.\n\n۲. اگر محتوای لینک هم صوتی و هم تصویری باشه، ازت می‌پرسم که کدوم رو می‌خوای برات دانلود کنم:\n   🎵 *صدا* (فایل MP3 با کاور)\n   🎬 *ویدیو* (فایل MP4)\n\n۳. بعد از انتخاب، فایل رو برات آماده و ارسال می‌کنم\\!", escapedBotDisplayName)
 	default:
 		msgText = tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "دستور شناخته نشد. برای راهنمایی /help رو بزنید.")
 	}
@@ -402,12 +399,6 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 
 	downloadingMsgText := ""
 	if trackInfo.Title != "Unknown Title" && trackInfo.Artist != "Unknown Artist" {
-		// Note: A hyphen between artist and title in a code block needs escaping if it's at the start of a line or after certain characters.
-		// fmt.Sprintf itself doesn't escape for markdown. The variables are already escaped.
-		// For `-` in `%s - %s`, if %s or %s is empty, it might become problematic, but here they are checked.
-		// A safer way for `Artist - Title` in a code block if it's alone:
-		// ` ` + escapedArtist + ` \- ` + escapedTitle + ` `
-		// However, since we have other text around it, `%s \- %s` with already escaped parts should be fine.
 		downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* برای:\n`%s \\- %s`\n\nاین فرآیند ممکن است کمی طول بکشد، لطفاً صبور باشید... ⏳", escapedFileType, escapedArtist, escapedTitle)
 	} else {
 		downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* شما... ⏳", escapedFileType)
@@ -454,8 +445,6 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 
 	if trackInfo.ThumbnailURL != "" && (dlType == downloader.AudioOnly || dlType == downloader.VideoBest) {
 		photoMsg := tgbotapi.NewPhoto(chatID, tgbotapi.FileURL(trackInfo.ThumbnailURL))
-		// photoMsg.Caption = fmt.Sprintf("*%s*\n_%s_", escapedTitle, escapedArtist) // کپشن عکس کاور اختیاری
-		// photoMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		if _, err := b.api.Send(photoMsg); err != nil {
 			log.Printf("[%s] Error sending cover photo for %s: %v\n", userIdentifier, trackInfo.Title, err)
 		} else {
