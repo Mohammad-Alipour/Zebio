@@ -68,11 +68,7 @@ func (b *Bot) sendJoinChannelMessage(chatID int64, channelUsername string, reply
 	channelLink := "https://t.me/" + strings.TrimPrefix(channelUsername, "@")
 	escapedBotName := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, b.api.Self.FirstName)
 	escapedChannelLink := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, channelLink)
-
-	// این متن پیام به نظر بدون مشکل خاصی برای '.' یا '!' هست، چون متغیرها escape میشن
-	// و متن ثابت شامل کاراکتر خاص رزرو شده نیست.
-	replyText := fmt.Sprintf("⚠️ کاربر گرامی، برای استفاده از امکانات ربات *%s*، ابتدا باید در کانال رسمی ما عضو شوید:\n\n%s\n\nپس از عضویت، دوباره دستور خود را ارسال کنید یا /start را بزنید.", escapedBotName, escapedChannelLink)
-
+	replyText := fmt.Sprintf("⚠️ کاربر گرامی، برای استفاده از امکانات ربات *%s*، ابتدا باید در کانال رسمی ما عضو شوید:\n\n%s\n\nپس از عضویت، دوباره دستور خود را ارسال کنید یا /start را بزنید\\.", escapedBotName, escapedChannelLink) // نقطه با \. اصلاح شد
 	reply := tgbotapi.NewMessage(chatID, replyText)
 	reply.ParseMode = tgbotapi.ModeMarkdownV2
 	if replyToMessageID != 0 {
