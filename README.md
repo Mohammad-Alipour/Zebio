@@ -4,7 +4,7 @@
 
 ## ✨ Features
 
-- 🎵 Download audio from SoundCloud, YouTube, and other supported services  
+- 🎵 Download audio from SoundCloud, YouTube, and other services  
 - 📹 Download videos in various qualities  
 - 🟢 Fetch Spotify metadata and search matching tracks  
 - 🔗 Accepts various URL formats and handles redirects  
