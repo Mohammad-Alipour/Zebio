@@ -5,22 +5,22 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	// "fmt" // اگر برای خطا در توکن لازم شد
 )
 
 type Config struct {
-	TelegramBotToken string
-	YTDLPPath        string
-	DownloadDir      string
-	AllowedUserIDs   []int64
-	ForceJoinChannel string // <--- فیلد جدید برای کانال جوین اجباری
+	TelegramBotToken    string
+	YTDLPPath           string
+	DownloadDir         string
+	AllowedUserIDs      []int64
+	ForceJoinChannel    string
+	SpotifyClientID     string
+	SpotifyClientSecret string
 }
 
 func Load() (*Config, error) {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if token == "" {
 		log.Println("WARNING: TELEGRAM_BOT_TOKEN environment variable not set.")
-		// return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN must be set")
 	}
 
 	ytDlpPath := os.Getenv("YTDLP_PATH")
@@ -47,14 +47,15 @@ func Load() (*Config, error) {
 			}
 			allowedUserIDs = append(allowedUserIDs, id)
 		}
-		log.Printf("Allowed user IDs loaded: %v\n", allowedUserIDs)
+		if len(allowedUserIDs) > 0 {
+			log.Printf("Allowed user IDs loaded: %v\n", allowedUserIDs)
+		}
 	} else {
 		log.Println("ALLOWED_USER_IDS not set. Bot will be open to all (if no other checks are in place).")
 	}
 
-	forceJoinChannel := os.Getenv("FORCE_JOIN_CHANNEL") // <--- خواندن از متغیر محیطی
+	forceJoinChannel := os.Getenv("FORCE_JOIN_CHANNEL")
 	if forceJoinChannel != "" {
-		// برای اطمینان، اگر @ در ابتدا نبود، اضافه می‌کنیم (هرچند بهتره با @ تنظیم بشه)
 		if !strings.HasPrefix(forceJoinChannel, "@") {
 			forceJoinChannel = "@" + forceJoinChannel
 		}
@@ -63,11 +64,22 @@ func Load() (*Config, error) {
 		log.Println("FORCE_JOIN_CHANNEL not set. No mandatory channel join required.")
 	}
 
+	spotifyClientID := os.Getenv("SPOTIFY_CLIENT_ID")
+	spotifyClientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
+
+	if spotifyClientID == "" || spotifyClientSecret == "" {
+		log.Println("WARNING: SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET is not set. Spotify features will be disabled.")
+	} else {
+		log.Println("Spotify ClientID and ClientSecret loaded successfully.")
+	}
+
 	return &Config{
-		TelegramBotToken: token,
-		YTDLPPath:        ytDlpPath,
-		DownloadDir:      downloadDir,
-		AllowedUserIDs:   allowedUserIDs,
-		ForceJoinChannel: forceJoinChannel, // <--- اضافه کردن به ساختار خروجی
+		TelegramBotToken:    token,
+		YTDLPPath:           ytDlpPath,
+		DownloadDir:         downloadDir,
+		AllowedUserIDs:      allowedUserIDs,
+		ForceJoinChannel:    forceJoinChannel,
+		SpotifyClientID:     spotifyClientID,
+		SpotifyClientSecret: spotifyClientSecret,
 	}, nil
 }

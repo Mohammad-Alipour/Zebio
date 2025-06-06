@@ -19,6 +19,7 @@ type DownloadType int
 const (
 	AudioOnly DownloadType = iota
 	VideoBest
+	ImageBest
 )
 
 type Downloader struct {
@@ -33,8 +34,8 @@ type TrackInfo struct {
 	Extension    string
 	Filename     string
 	OriginalURL  string
-	IsAudioOnly  bool
-	IsVideo      bool
+	HasVideo     bool
+	HasImage     bool
 }
 
 func New(cfg *config.Config) (*Downloader, error) {
@@ -55,11 +56,9 @@ func New(cfg *config.Config) (*Downloader, error) {
 
 func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, error) {
 	log.Printf("[%s] Fetching track info for URL: %s\n", username, urlStr)
-	cmd := exec.Command(d.ytDLPPath,
-		"-J",
-		"--no-playlist",
-		urlStr,
-	)
+
+	cmd := exec.Command(d.ytDLPPath, "-J", "--no-playlist", urlStr)
+
 	var jsonData bytes.Buffer
 	var stderrBuf bytes.Buffer
 	cmd.Stdout = &jsonData
@@ -74,17 +73,17 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 	}
 
 	var data struct {
-		ID         string `json:"id"`
-		Title      string `json:"title"`
-		Artist     string `json:"artist"`
-		Creator    string `json:"creator"`
-		Uploader   string `json:"uploader"`
-		Thumbnail  string `json:"thumbnail"`
-		Ext        string `json:"ext"`
-		Acodec     string `json:"acodec"`
-		Vcodec     string `json:"vcodec"`
-		Filename   string `json:"_filename"`
-		WebpageURL string `json:"webpage_url"`
+		ID           string `json:"id"`
+		Title        string `json:"title"`
+		Artist       string `json:"artist"`
+		Creator      string `json:"creator"`
+		Uploader     string `json:"uploader"`
+		Thumbnail    string `json:"thumbnail"`
+		Ext          string `json:"ext"`
+		Vcodec       string `json:"vcodec"`
+		ExtractorKey string `json:"extractor_key"`
+		Filename     string `json:"_filename"`
+		WebpageURL   string `json:"webpage_url"`
 	}
 
 	if err := json.Unmarshal(jsonData.Bytes(), &data); err != nil {
@@ -119,17 +118,14 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 	}
 
 	if data.Vcodec != "none" && data.Vcodec != "" {
-		info.IsVideo = true
-		info.IsAudioOnly = false
-	} else if data.Acodec != "none" && data.Acodec != "" {
-		info.IsAudioOnly = true
-		info.IsVideo = false
-	} else {
-		info.IsAudioOnly = false
-		info.IsVideo = false
+		info.HasVideo = true
 	}
 
-	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', Ext: '%s', IsVideo: %t, IsAudioOnly: %t\n", username, info.Title, info.Artist, info.Extension, info.IsVideo, info.IsAudioOnly)
+	if data.ExtractorKey == "Instagram" && !info.HasVideo {
+		info.HasImage = true
+	}
+
+	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage)
 	return info, nil
 }
 
@@ -138,52 +134,26 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 	start := time.Now()
 
 	var cmdArgs []string
-	var determinedExtension string
-
 	outputFilename := fmt.Sprintf("%s - %s", info.Artist, info.Title)
 	outputTemplateBase := filepath.Join(d.downloadDir, outputFilename)
 
 	switch prefType {
 	case AudioOnly:
-		determinedExtension = "mp3"
 		cmdArgs = []string{
-			"-v",
-			"--no-playlist",
-			"-f", "bestaudio/best",
-			"--extract-audio",
-			"--audio-format", determinedExtension,
-			"--restrict-filenames",
-			"--embed-thumbnail",
-			"-o", outputTemplateBase + ".%(ext)s",
-			urlStr,
+			"-v", "--no-playlist", "-f", "bestaudio/best", "--extract-audio",
+			"--audio-format", "mp3", "--restrict-filenames", "--embed-thumbnail",
+			"-o", outputTemplateBase + ".%(ext)s", urlStr,
 		}
 	case VideoBest:
-		if info.IsAudioOnly {
-			log.Printf("[%s] User requested video, but content is audio-only. Downloading as audio.\n", username)
-			determinedExtension = "mp3"
-			cmdArgs = []string{
-				"-v",
-				"--no-playlist",
-				"-f", "bestaudio/best",
-				"--extract-audio",
-				"--audio-format", determinedExtension,
-				"--restrict-filenames",
-				"--embed-thumbnail",
-				"-o", outputTemplateBase + ".%(ext)s",
-				urlStr,
-			}
-		} else {
-			determinedExtension = "mp4"
-			cmdArgs = []string{
-				"-v",
-				"--no-playlist",
-				"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-				"--merge-output-format", "mp4",
-				"--restrict-filenames",
-				"--embed-thumbnail",
-				"-o", outputTemplateBase + ".%(ext)s",
-				urlStr,
-			}
+		cmdArgs = []string{
+			"-v", "--no-playlist", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+			"--merge-output-format", "mp4", "--restrict-filenames", "--embed-thumbnail",
+			"-o", outputTemplateBase + ".%(ext)s", urlStr,
+		}
+	case ImageBest:
+		cmdArgs = []string{
+			"-v", "--no-playlist", "--restrict-filenames",
+			"-o", outputTemplateBase + ".%(ext)s", urlStr,
 		}
 	default:
 		return "", "", fmt.Errorf("[%s] unknown download type requested", username)
@@ -215,7 +185,6 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 	}
 
 	detectedExt := strings.TrimPrefix(filepath.Ext(actualFilename), ".")
-
 	elapsed := time.Since(start)
 	log.Printf("[%s] Download and processing for %s finished in %s. File: %s, Actual Ext: %s\n", username, urlStr, elapsed, actualFilename, detectedExt)
 	return actualFilename, detectedExt, nil

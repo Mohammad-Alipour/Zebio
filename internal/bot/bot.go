@@ -68,7 +68,7 @@ func (b *Bot) sendJoinChannelMessage(chatID int64, channelUsername string, reply
 	channelLink := "https://t.me/" + strings.TrimPrefix(channelUsername, "@")
 	escapedBotName := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, b.api.Self.FirstName)
 	escapedChannelLink := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, channelLink)
-	replyText := fmt.Sprintf("⚠️ کاربر گرامی، برای استفاده از امکانات ربات *%s*، ابتدا باید در کانال رسمی ما عضو شوید:\n\n%s\n\nپس از عضویت، دوباره دستور خود را ارسال کنید یا /start را بزنید\\.", escapedBotName, escapedChannelLink) // نقطه با \. اصلاح شد
+	replyText := fmt.Sprintf("⚠️ کاربر گرامی، برای استفاده از امکانات ربات *%s*، ابتدا باید در کانال رسمی ما عضو شوید:\n\n%s\n\nپس از عضویت، دوباره دستور خود را ارسال کنید یا /start را بزنید\\.", escapedBotName, escapedChannelLink)
 	reply := tgbotapi.NewMessage(chatID, replyText)
 	reply.ParseMode = tgbotapi.ModeMarkdownV2
 	if replyToMessageID != 0 {
@@ -137,7 +137,7 @@ func (b *Bot) Start() {
 			isMember, channelToJoin, err := b.isUserMemberOfRequiredChannel(userID)
 			if err != nil {
 				log.Printf("Error during channel membership check for user %d: %v. Sending error message.", userID, err)
-				errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "خطا در بررسی عضویت کانال\\. لطفاً لحظاتی دیگر دوباره امتحان کنید\\.") // نقطه اضافه شد
+				errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "خطا در بررسی عضویت کانال\\. لطفاً لحظاتی دیگر دوباره امتحان کنید\\.")
 				reply := tgbotapi.NewMessage(chatID, errMsgText)
 				reply.ParseMode = tgbotapi.ModeMarkdownV2
 				if messageID != 0 && !isCallback {
@@ -158,7 +158,6 @@ func (b *Bot) Start() {
 				}
 				b.sendJoinChannelMessage(chatID, channelToJoin, replyToID)
 				if isCallback {
-					// پیام Callback نیاز به escape کردن '.' داره اگر در آن استفاده شده باشد
 					b.api.Send(tgbotapi.NewCallback(update.CallbackQuery.ID, "لطفا ابتدا در کانال عضو شوید\\."))
 				}
 				continue
@@ -175,7 +174,7 @@ func (b *Bot) Start() {
 			}
 			if !isAllowed {
 				log.Printf("User %s (%d) is not in AllowedUserIDs list. Ignoring.", userName, userID)
-				errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "متاسفم، شما اجازه استفاده از این ربات را ندارید\\.") // نقطه اضافه شد
+				errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "متاسفم، شما اجازه استفاده از این ربات را ندارید\\.")
 				reply := tgbotapi.NewMessage(chatID, errMsgText)
 				reply.ParseMode = tgbotapi.ModeMarkdownV2
 				if messageID != 0 && !isCallback {
@@ -183,7 +182,6 @@ func (b *Bot) Start() {
 				}
 				b.api.Send(reply)
 				if isCallback {
-					// پیام Callback نیاز به escape کردن '.' داره اگر در آن استفاده شده باشد
 					b.api.Send(tgbotapi.NewCallback(update.CallbackQuery.ID, "شما مجاز نیستید\\."))
 				}
 				continue
@@ -237,8 +235,7 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 
 	log.Printf("[%s] Received link to process: %s\n", userIdentifier, urlToDownload)
 
-	// نقطه ها در این پیام escape می شوند چون کل پیام escape می شود
-	processingMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🔍 در حال بررسی و دریافت اطلاعات از لینک شما... لطفاً چند لحظه صبر کنید.")
+	processingMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🔍 در حال بررسی و دریافت اطلاعات از لینک شما\\.\\.\\. لطفاً چند لحظه صبر کنید\\.")
 	processingMsg := tgbotapi.NewMessage(chatID, processingMsgText)
 	processingMsg.ParseMode = tgbotapi.ModeMarkdownV2
 	processingMsg.ReplyToMessageID = message.MessageID
@@ -250,59 +247,49 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 	trackInfo, err := b.downloader.GetTrackInfo(urlToDownload, userIdentifier)
 	if err != nil {
 		log.Printf("[%s] Error fetching track info for URL %s: %v\n", userIdentifier, urlToDownload, err)
-		// در اینجا err.Error() escape میشه، پس نیازی به نگرانی در مورد محتوای خود خطا نیست
 		escapedError := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, err.Error())
-		// نقطه ها در متن ثابت زیر باید escape شوند
 		errorMsgText := fmt.Sprintf("⚠️ متاسفانه در پردازش اولیه لینک شما مشکلی پیش آمد\\.\n\nعلت خطا:\n`%s`\n\nلطفاً از صحت لینک مطمئن شوید یا لینک دیگری را امتحان کنید\\. اگر مشکل ادامه داشت، بعداً دوباره تلاش کنید\\.", escapedError)
 		errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		errMsg.ReplyToMessageID = message.MessageID
 		b.api.Send(errMsg)
 		if sentPInfoMsg.MessageID != 0 {
-			_, delErr := b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
-			if delErr != nil {
-				log.Printf("[%s] Failed to delete 'PInfoMsg' after error: %v", userIdentifier, delErr)
-			}
+			b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
 		}
 		return
 	}
 
 	if sentPInfoMsg.MessageID != 0 {
-		_, delErr := b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
-		if delErr != nil {
-			log.Printf("[%s] Failed to delete 'PInfoMsg': %v", userIdentifier, delErr)
-		}
+		b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
 	}
 
-	var keyboard tgbotapi.InlineKeyboardMarkup
-	escapedArtist := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, trackInfo.Artist)
-	escapedTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, trackInfo.Title)
+	var buttons []tgbotapi.InlineKeyboardButton
+	if trackInfo.HasVideo {
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("دانلود ویدیو 🎬", fmt.Sprintf("dltype:video:%d", message.MessageID)))
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("دانلود صدا 🎵", fmt.Sprintf("dltype:audio:%d", message.MessageID)))
+	}
+	if trackInfo.HasImage {
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("دانلود عکس 🖼️", fmt.Sprintf("dltype:photo:%d", message.MessageID)))
+	}
 
-	if trackInfo.IsVideo {
-		keyboard = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("دانلود صدا 🎵", fmt.Sprintf("dltype:audio:%d", message.MessageID)),
-				tgbotapi.NewInlineKeyboardButtonData("دانلود ویدیو 🎬", fmt.Sprintf("dltype:video:%d", message.MessageID)),
-			),
-		)
-	} else if trackInfo.IsAudioOnly {
-		keyboard = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("دانلود صدا 🎵", fmt.Sprintf("dltype:audio:%d", message.MessageID)),
-			),
-		)
-	} else {
-		log.Printf("[%s] Content type unclear for %s. Defaulting to audio download directly.", userIdentifier, urlToDownload)
-		b.processDownloadRequest(message.Chat.ID, message.MessageID, urlToDownload, downloader.AudioOnly, trackInfo, userName, userID, fromFirstName)
+	if len(buttons) == 0 {
+		log.Printf("[%s] No downloadable content type (video/image) found for URL %s. Informing user.", userIdentifier, urlToDownload)
+		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "محتوای قابل دانلودی (ویدیو یا عکس) در این لینک پیدا نشد\\.")
+		errMsg := tgbotapi.NewMessage(chatID, errMsgText)
+		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
+		errMsg.ReplyToMessageID = message.MessageID
+		b.api.Send(errMsg)
 		return
 	}
 
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons)
+	escapedArtist := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, trackInfo.Artist)
+	escapedTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, trackInfo.Title)
+
 	choiceMsgText := ""
 	if trackInfo.Title != "Unknown Title" && trackInfo.Artist != "Unknown Artist" {
-		// نقطه ها در متن ثابت زیر باید escape شوند
-		choiceMsgText = fmt.Sprintf("✅ اطلاعات با موفقیت دریافت شد:\n*خواننده:* `%s`\n*عنوان:* `%s`\n\nحالا انتخاب کنید که کدام مورد را برای شما آماده کنم؟ 👇", escapedArtist, escapedTitle)
+		choiceMsgText = fmt.Sprintf("✅ اطلاعات با موفقیت دریافت شد:\n*خواننده/پیج:* `%s`\n*عنوان:* `%s`\n\nحالا انتخاب کنید که کدام مورد را برای شما آماده کنم؟ 👇", escapedArtist, escapedTitle)
 	} else {
-		// نقطه ها در متن ثابت زیر باید escape شوند
 		choiceMsgText = "✅ اطلاعات اولیه لینک دریافت شد\\.\n\nلطفاً نوع دانلود مورد نظرتون رو انتخاب کنید: 👇"
 	}
 	choiceMsg := tgbotapi.NewMessage(chatID, choiceMsgText)
@@ -315,7 +302,7 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 }
 
 func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName string, userID int64, fromFirstName string) {
-	b.api.Send(tgbotapi.NewCallback(callback.ID, "")) // پیام Callback معمولا ساده است و نیاز به escape ندارد مگر اینکه خودتان چیزی اضافه کنید
+	b.api.Send(tgbotapi.NewCallback(callback.ID, ""))
 
 	chatID := callback.Message.Chat.ID
 	userIdentifier := userName + "_" + strconv.FormatInt(userID, 10)
@@ -328,7 +315,7 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 		originalLinkURL = callback.Message.ReplyToMessage.Text
 	} else {
 		log.Printf("[%s] Callback query message does not have ReplyToMessage. Cannot determine original link.", userIdentifier)
-		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🚫 یک خطای داخلی در یافتن لینک اصلی شما رخ داد (کد خطا: CB_NO_LINK). لطفاً دوباره لینک را ارسال کرده و سپس انتخاب کنید.")
+		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🚫 یک خطای داخلی در یافتن لینک اصلی شما رخ داد \\(کد خطا: CB_NO_LINK\\)\\. لطفاً دوباره لینک را ارسال کرده و سپس انتخاب کنید\\.")
 		errMsg := tgbotapi.NewMessage(chatID, errMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		b.api.Send(errMsg)
@@ -337,7 +324,7 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 
 	if originalLinkURL == "" {
 		log.Printf("[%s] Original link URL is empty from ReplyToMessage.", userIdentifier)
-		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🚫 یک خطای داخلی در یافتن لینک اصلی شما رخ داد (کد خطا: CB_EMPTY_LINK). لطفاً دوباره لینک را ارسال کرده و سپس انتخاب کنید.")
+		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🚫 یک خطای داخلی در یافتن لینک اصلی شما رخ داد \\(کد خطا: CB_EMPTY_LINK\\)\\. لطفاً دوباره لینک را ارسال کرده و سپس انتخاب کنید\\.")
 		errMsg := tgbotapi.NewMessage(chatID, errMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		b.api.Send(errMsg)
@@ -352,7 +339,7 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 	parts := strings.Split(callback.Data, ":")
 	if len(parts) < 2 || parts[0] != "dltype" {
 		log.Printf("[%s] Invalid callback data format: %s\n", userIdentifier, callback.Data)
-		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🚫 یک خطای داخلی در پردازش درخواست شما رخ داد (کد خطا: CB_INV_FORMAT). لطفاً دوباره تلاش کنید.")
+		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🚫 یک خطای داخلی در پردازش درخواست شما رخ داد \\(کد خطا: CB_INV_FORMAT\\)\\. لطفاً دوباره تلاش کنید\\.")
 		errMsg := tgbotapi.NewMessage(chatID, errMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		b.api.Send(errMsg)
@@ -366,9 +353,11 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 		dlType = downloader.AudioOnly
 	case "video":
 		dlType = downloader.VideoBest
+	case "photo":
+		dlType = downloader.ImageBest
 	default:
 		log.Printf("[%s] Unknown download type in callback: %s\n", userIdentifier, chosenTypeStr)
-		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🚫 نوع دانلود درخواستی شما نامعتبر است (کد خطا: CB_INV_TYPE). لطفاً دوباره تلاش کنید.")
+		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🚫 نوع دانلود درخواستی شما نامعتبر است \\(کد خطا: CB_INV_TYPE\\)\\. لطفاً دوباره تلاش کنید\\.")
 		errMsg := tgbotapi.NewMessage(chatID, errMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		b.api.Send(errMsg)
@@ -381,7 +370,7 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 	if err != nil {
 		log.Printf("[%s] Error re-fetching track info for URL %s: %v\n", userIdentifier, originalLinkURL, err)
 		escapedError := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, err.Error())
-		errorMsgText := fmt.Sprintf("⚠️ متاسفانه در پردازش اولیه لینک شما مشکلی پیش آمد\\.\n\nعلت خطا:\n`%s`\n\nلطفاً از صحت لینک مطمئن شوید یا لینک دیگری را امتحان کنید\\. اگر مشکل ادامه داشت، بعداً دوباره تلاش کنید\\.", escapedError) // نقطه ها اضافه شد
+		errorMsgText := fmt.Sprintf("⚠️ متاسفانه در پردازش اولیه لینک شما مشکلی پیش آمد\\.\n\nعلت خطا:\n`%s`\n\nلطفاً از صحت لینک مطمئن شوید یا لینک دیگری را امتحان کنید\\. اگر مشکل ادامه داشت، بعداً دوباره تلاش کنید\\.", escapedError)
 		errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		if originalLinkMessageID != 0 {
@@ -402,8 +391,6 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 
 	downloadingMsgText := ""
 	if trackInfo.Title != "Unknown Title" && trackInfo.Artist != "Unknown Artist" {
-		// نقطه ها در این پیام هم باید escape شوند اگر مستقیما در رشته باشند
-		// استفاده از \- برای جدا کردن ارتیست و تایتل در بلاک کد امن تر است
 		downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* برای:\n`%s \\- %s`\n\nاین فرآیند ممکن است کمی طول بکشد، لطفاً صبور باشید\\.\\.\\. ⏳", escapedFileType, escapedArtist, escapedTitle)
 	} else {
 		downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* شما\\.\\.\\. ⏳", escapedFileType)
@@ -423,7 +410,7 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 	if err != nil {
 		log.Printf("[%s] Error downloading media for URL %s: %v\n", userIdentifier, urlToDownload, err)
 		escapedError := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, err.Error())
-		errorMsgText := fmt.Sprintf("❌ متاسفانه در فرآیند دانلود مشکلی پیش آمد\\.\n\nجزئیات خطا:\n`%s`\n\nلطفاً لینک دیگری را امتحان کنید یا اگر فکر می‌کنید لینک سالم است، چند لحظه دیگر دوباره تلاش کنید\\.", escapedError) // نقطه ها اضافه شد
+		errorMsgText := fmt.Sprintf("❌ متاسفانه در فرآیند دانلود مشکلی پیش آمد\\.\n\nجزئیات خطا:\n`%s`\n\nلطفاً لینک دیگری را امتحان کنید یا اگر فکر می‌کنید لینک سالم است، چند لحظه دیگر دوباره تلاش کنید\\.", escapedError)
 		errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		if originalLinkMessageID != 0 {
@@ -431,37 +418,21 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 		}
 		b.api.Send(errMsg)
 		if sentDlNoticeMsg.MessageID != 0 {
-			_, delErr := b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentDlNoticeMsg.MessageID))
-			if delErr != nil {
-				log.Printf("[%s] Failed to delete 'DlNoticeMsg' after error: %v", userIdentifier, delErr)
-			}
+			b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentDlNoticeMsg.MessageID))
 		}
 		return
 	}
 
 	if sentDlNoticeMsg.MessageID != 0 {
-		_, delErr := b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentDlNoticeMsg.MessageID))
-		if delErr != nil {
-			log.Printf("[%s] Failed to delete 'DlNoticeMsg': %v", userIdentifier, delErr)
-		}
+		b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentDlNoticeMsg.MessageID))
 	}
 
 	log.Printf("[%s] Media downloaded: %s (ext: %s). Sending to user.\n", userIdentifier, downloadedFilePath, actualExt)
 
-	if trackInfo.ThumbnailURL != "" && (dlType == downloader.AudioOnly || dlType == downloader.VideoBest) {
-		photoMsg := tgbotapi.NewPhoto(chatID, tgbotapi.FileURL(trackInfo.ThumbnailURL))
-		if _, err := b.api.Send(photoMsg); err != nil {
-			log.Printf("[%s] Error sending cover photo for %s: %v\n", userIdentifier, trackInfo.Title, err)
-		} else {
-			log.Printf("[%s] Cover art for %s sent successfully.\n", userIdentifier, trackInfo.Title)
-		}
-	}
-
-	var caption string
 	escapedBotUsernameMention := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "@"+b.api.Self.UserName)
 
 	if dlType == downloader.AudioOnly || actualExt == "mp3" {
-		caption = fmt.Sprintf("🎵 *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
+		caption := fmt.Sprintf("🎵 *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
 		audioFile := tgbotapi.NewAudio(chatID, tgbotapi.FilePath(downloadedFilePath))
 		if originalLinkMessageID != 0 {
 			audioFile.ReplyToMessageID = originalLinkMessageID
@@ -470,55 +441,74 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 		audioFile.Performer = trackInfo.Artist
 		audioFile.Caption = caption
 		audioFile.ParseMode = tgbotapi.ModeMarkdownV2
-		sentMediaMessage, sendErr := b.api.Send(audioFile)
+		_, sendErr := b.api.Send(audioFile)
 		if sendErr != nil {
 			log.Printf("[%s] Error sending audio file %s: %v\n", userIdentifier, downloadedFilePath, sendErr)
 			escapedSendError := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, sendErr.Error())
-			errorMsgText := fmt.Sprintf("⚠️ فایل شما با موفقیت دانلود شد، اما متاسفانه در مرحله ارسال به تلگرام مشکلی رخ داد\\.\n\nجزئیات خطا:\n`%s`", escapedSendError) // نقطه اضافه شد
+			errorMsgText := fmt.Sprintf("⚠️ فایل شما با موفقیت دانلود شد، اما متاسفانه در مرحله ارسال به تلگرام مشکلی رخ داد\\.\n\nجزئیات خطا:\n`%s`", escapedSendError)
 			errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
 			errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 			b.api.Send(errMsg)
 		} else {
-			log.Printf("[%s] Audio file %s sent successfully. MessageID: %d\n", userIdentifier, downloadedFilePath, sentMediaMessage.MessageID)
+			log.Printf("[%s] Audio file %s sent successfully.\n", userIdentifier, downloadedFilePath)
 		}
 	} else if dlType == downloader.VideoBest || actualExt == "mp4" || actualExt == "mkv" || actualExt == "webm" {
-		caption = fmt.Sprintf("🎬 *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
+		caption := fmt.Sprintf("🎬 *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
 		videoFile := tgbotapi.NewVideo(chatID, tgbotapi.FilePath(downloadedFilePath))
 		if originalLinkMessageID != 0 {
 			videoFile.ReplyToMessageID = originalLinkMessageID
 		}
 		videoFile.Caption = caption
 		videoFile.ParseMode = tgbotapi.ModeMarkdownV2
-		sentMediaMessage, sendErr := b.api.Send(videoFile)
+		_, sendErr := b.api.Send(videoFile)
 		if sendErr != nil {
 			log.Printf("[%s] Error sending video file %s: %v\n", userIdentifier, downloadedFilePath, sendErr)
 			escapedSendError := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, sendErr.Error())
-			errorMsgText := fmt.Sprintf("⚠️ فایل شما با موفقیت دانلود شد، اما متاسفانه در مرحله ارسال به تلگرام مشکلی رخ داد\\.\n\nجزئیات خطا:\n`%s`", escapedSendError) // نقطه اضافه شد
+			errorMsgText := fmt.Sprintf("⚠️ فایل شما با موفقیت دانلود شد، اما متاسفانه در مرحله ارسال به تلگرام مشکلی رخ داد\\.\n\nجزئیات خطا:\n`%s`", escapedSendError)
 			errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
 			errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 			b.api.Send(errMsg)
 		} else {
-			log.Printf("[%s] Video file %s sent successfully. MessageID: %d\n", userIdentifier, downloadedFilePath, sentMediaMessage.MessageID)
+			log.Printf("[%s] Video file %s sent successfully.\n", userIdentifier, downloadedFilePath)
+		}
+	} else if dlType == downloader.ImageBest || actualExt == "jpg" || actualExt == "jpeg" || actualExt == "webp" || actualExt == "png" {
+		caption := fmt.Sprintf("🖼️ *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
+		photoFile := tgbotapi.NewPhoto(chatID, tgbotapi.FilePath(downloadedFilePath))
+		photoFile.Caption = caption
+		photoFile.ParseMode = tgbotapi.ModeMarkdownV2
+		if originalLinkMessageID != 0 {
+			photoFile.ReplyToMessageID = originalLinkMessageID
+		}
+		_, sendErr := b.api.Send(photoFile)
+		if sendErr != nil {
+			log.Printf("[%s] Error sending photo file %s: %v\n", userIdentifier, downloadedFilePath, sendErr)
+			escapedSendError := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, sendErr.Error())
+			errorMsgText := fmt.Sprintf("⚠️ فایل شما با موفقیت دانلود شد، اما متاسفانه در مرحله ارسال به تلگرام مشکلی رخ داد\\.\n\nجزئیات خطا:\n`%s`", escapedSendError)
+			errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
+			errMsg.ParseMode = tgbotapi.ModeMarkdownV2
+			b.api.Send(errMsg)
+		} else {
+			log.Printf("[%s] Photo file %s sent successfully.\n", userIdentifier, downloadedFilePath)
 		}
 	} else {
 		log.Printf("[%s] Unknown/unhandled extension '%s', sending as document.\n", userIdentifier, actualExt)
-		caption = fmt.Sprintf("📄 *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
+		caption := fmt.Sprintf("📄 *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
 		docFile := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(downloadedFilePath))
 		if originalLinkMessageID != 0 {
 			docFile.ReplyToMessageID = originalLinkMessageID
 		}
 		docFile.Caption = caption
 		docFile.ParseMode = tgbotapi.ModeMarkdownV2
-		sentMediaMessage, sendErr := b.api.Send(docFile)
+		_, sendErr := b.api.Send(docFile)
 		if sendErr != nil {
 			log.Printf("[%s] Error sending document file %s: %v\n", userIdentifier, downloadedFilePath, sendErr)
 			escapedSendError := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, sendErr.Error())
-			errorMsgText := fmt.Sprintf("⚠️ فایل شما با موفقیت دانلود شد، اما متاسفانه در مرحله ارسال به تلگرام مشکلی رخ داد\\.\n\nجزئیات خطا:\n`%s`", escapedSendError) // نقطه اضافه شد
+			errorMsgText := fmt.Sprintf("⚠️ فایل شما با موفقیت دانلود شد، اما متاسفانه در مرحله ارسال به تلگرام مشکلی رخ داد\\.\n\nجزئیات خطا:\n`%s`", escapedSendError)
 			errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
 			errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 			b.api.Send(errMsg)
 		} else {
-			log.Printf("[%s] Document file %s sent successfully. MessageID: %d\n", userIdentifier, downloadedFilePath, sentMediaMessage.MessageID)
+			log.Printf("[%s] Document file %s sent successfully.\n", userIdentifier, downloadedFilePath)
 		}
 	}
 
@@ -537,6 +527,9 @@ func typeToString(dlType downloader.DownloadType) string {
 	}
 	if dlType == downloader.VideoBest {
 		return "فایل ویدیویی"
+	}
+	if dlType == downloader.ImageBest {
+		return "فایل عکس"
 	}
 	return "فایل"
 }
