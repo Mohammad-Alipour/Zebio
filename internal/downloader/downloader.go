@@ -59,7 +59,7 @@ func New(cfg *config.Config) (*Downloader, error) {
 func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, error) {
 	log.Printf("[%s] Fetching track info for URL: %s\n", username, urlStr)
 
-	cmd := exec.Command(d.ytDLPPath, "-J", "--no-playlist", urlStr)
+	cmd := exec.Command(d.ytDLPPath, "-J", "--no-playlist", "-i", urlStr)
 
 	var jsonData bytes.Buffer
 	var stderrBuf bytes.Buffer
@@ -71,7 +71,13 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		log.Printf("[%s] yt-dlp (info) STDERR for %s:\n%s\n", username, urlStr, stderrBuf.String())
 	}
 	if err != nil {
-		return nil, fmt.Errorf("[%s] failed to get track info from yt-dlp for %s: %w", username, urlStr, err)
+		if _, ok := err.(*exec.ExitError); !ok {
+			return nil, fmt.Errorf("[%s] failed to run yt-dlp for %s: %w", username, urlStr, err)
+		}
+	}
+
+	if jsonData.Len() == 0 {
+		return nil, fmt.Errorf("[%s] yt-dlp returned no JSON data for %s", username, urlStr)
 	}
 
 	var data struct {
@@ -154,7 +160,7 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		info.IsAudioOnly = true
 	}
 
-	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t, IsAudioOnly: %t\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage, info.IsAudioOnly)
+	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t, IsAudioOnly: %t, DirectImageURL: %s\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage, info.IsAudioOnly, info.DirectImageURL)
 	return info, nil
 }
 
