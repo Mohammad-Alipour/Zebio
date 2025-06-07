@@ -75,8 +75,7 @@ func (b *Bot) sendJoinChannelMessage(chatID int64, channelUsername string, reply
 		reply.ReplyToMessageID = replyToMessageID
 	}
 	joinButton := tgbotapi.NewInlineKeyboardButtonURL("عضویت در کانال 🚀", channelLink)
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(joinButton))
-	reply.ReplyMarkup = keyboard
+	_ = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(joinButton))
 	if _, err := b.api.Send(reply); err != nil {
 		log.Printf("Error sending 'please join channel' message to chat %d: %v", chatID, err)
 	}
@@ -235,7 +234,7 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 
 	log.Printf("[%s] Received link to process: %s\n", userIdentifier, urlToDownload)
 
-	processingMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🔍 در حال بررسی و دریافت اطلاعات از لینک شما\\.\\.\\. لطفاً چند لحظه صبر کنید\\.")
+	processingMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🔍 در حال بررسی و دریافت اطلاعات از لینک شما... لطفاً چند لحظه صبر کنید.")
 	processingMsg := tgbotapi.NewMessage(chatID, processingMsgText)
 	processingMsg.ParseMode = tgbotapi.ModeMarkdownV2
 	processingMsg.ReplyToMessageID = message.MessageID
@@ -264,17 +263,20 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 	}
 
 	var buttons []tgbotapi.InlineKeyboardButton
+
 	if trackInfo.HasVideo {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("دانلود ویدیو 🎬", fmt.Sprintf("dltype:video:%d", message.MessageID)))
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("دانلود صدا 🎵", fmt.Sprintf("dltype:audio:%d", message.MessageID)))
+		videoButton := tgbotapi.NewInlineKeyboardButtonData("دانلود ویدیو 🎬", fmt.Sprintf("dltype:video:%d", message.MessageID))
+		audioButton := tgbotapi.NewInlineKeyboardButtonData("دانلود صدا 🎵", fmt.Sprintf("dltype:audio:%d", message.MessageID))
+		buttons = append(buttons, videoButton, audioButton)
 	}
 	if trackInfo.HasImage {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("دانلود عکس 🖼️", fmt.Sprintf("dltype:photo:%d", message.MessageID)))
+		photoButton := tgbotapi.NewInlineKeyboardButtonData("دانلود عکس 🖼️", fmt.Sprintf("dltype:photo:%d", message.MessageID))
+		buttons = append(buttons, photoButton)
 	}
 
 	if len(buttons) == 0 {
 		log.Printf("[%s] No downloadable content type (video/image) found for URL %s. Informing user.", userIdentifier, urlToDownload)
-		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "محتوای قابل دانلودی (ویدیو یا عکس) در این لینک پیدا نشد\\.")
+		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "محتوای قابل دانلودی \\(ویدیو یا عکس\\) در این لینک پیدا نشد\\.")
 		errMsg := tgbotapi.NewMessage(chatID, errMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		errMsg.ReplyToMessageID = message.MessageID
@@ -283,15 +285,17 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 	}
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons)
+
 	escapedArtist := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, trackInfo.Artist)
 	escapedTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, trackInfo.Title)
 
 	choiceMsgText := ""
 	if trackInfo.Title != "Unknown Title" && trackInfo.Artist != "Unknown Artist" {
-		choiceMsgText = fmt.Sprintf("✅ اطلاعات با موفقیت دریافت شد:\n*خواننده/پیج:* `%s`\n*عنوان:* `%s`\n\nحالا انتخاب کنید که کدام مورد را برای شما آماده کنم؟ 👇", escapedArtist, escapedTitle)
+		choiceMsgText = fmt.Sprintf("✅ اطلاعات با موفقیت دریافت شد:\n*پیج/خواننده:* `%s`\n*عنوان:* `%s`\n\nحالا انتخاب کنید که کدام مورد را برای شما آماده کنم؟ 👇", escapedArtist, escapedTitle)
 	} else {
 		choiceMsgText = "✅ اطلاعات اولیه لینک دریافت شد\\.\n\nلطفاً نوع دانلود مورد نظرتون رو انتخاب کنید: 👇"
 	}
+
 	choiceMsg := tgbotapi.NewMessage(chatID, choiceMsgText)
 	choiceMsg.ParseMode = tgbotapi.ModeMarkdownV2
 	choiceMsg.ReplyToMessageID = message.MessageID
@@ -474,11 +478,11 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 	} else if dlType == downloader.ImageBest || actualExt == "jpg" || actualExt == "jpeg" || actualExt == "webp" || actualExt == "png" {
 		caption := fmt.Sprintf("🖼️ *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
 		photoFile := tgbotapi.NewPhoto(chatID, tgbotapi.FilePath(downloadedFilePath))
-		photoFile.Caption = caption
-		photoFile.ParseMode = tgbotapi.ModeMarkdownV2
 		if originalLinkMessageID != 0 {
 			photoFile.ReplyToMessageID = originalLinkMessageID
 		}
+		photoFile.Caption = caption
+		photoFile.ParseMode = tgbotapi.ModeMarkdownV2
 		_, sendErr := b.api.Send(photoFile)
 		if sendErr != nil {
 			log.Printf("[%s] Error sending photo file %s: %v\n", userIdentifier, downloadedFilePath, sendErr)
