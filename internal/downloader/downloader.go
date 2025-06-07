@@ -28,14 +28,15 @@ type Downloader struct {
 }
 
 type TrackInfo struct {
-	Title        string
-	Artist       string
-	ThumbnailURL string
-	Extension    string
-	Filename     string
-	OriginalURL  string
-	HasVideo     bool
-	HasImage     bool
+	Title          string
+	Artist         string
+	ThumbnailURL   string
+	Extension      string
+	Filename       string
+	OriginalURL    string
+	HasVideo       bool
+	HasImage       bool
+	DirectImageURL string
 }
 
 func New(cfg *config.Config) (*Downloader, error) {
@@ -84,6 +85,7 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		ExtractorKey string `json:"extractor_key"`
 		Filename     string `json:"_filename"`
 		WebpageURL   string `json:"webpage_url"`
+		URL          string `json:"url"`
 	}
 
 	if err := json.Unmarshal(jsonData.Bytes(), &data); err != nil {
@@ -123,6 +125,7 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 
 	if data.ExtractorKey == "Instagram" && !info.HasVideo {
 		info.HasImage = true
+		info.DirectImageURL = data.URL
 	}
 
 	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage)
@@ -137,23 +140,28 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 	outputFilename := fmt.Sprintf("%s - %s", info.Artist, info.Title)
 	outputTemplateBase := filepath.Join(d.downloadDir, outputFilename)
 
+	downloadURL := urlStr
+
 	switch prefType {
 	case AudioOnly:
 		cmdArgs = []string{
 			"-v", "--no-playlist", "-f", "bestaudio/best", "--extract-audio",
 			"--audio-format", "mp3", "--restrict-filenames", "--embed-thumbnail",
-			"-o", outputTemplateBase + ".%(ext)s", urlStr,
+			"-o", outputTemplateBase + ".%(ext)s", downloadURL,
 		}
 	case VideoBest:
 		cmdArgs = []string{
 			"-v", "--no-playlist", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
 			"--merge-output-format", "mp4", "--restrict-filenames", "--embed-thumbnail",
-			"-o", outputTemplateBase + ".%(ext)s", urlStr,
+			"-o", outputTemplateBase + ".%(ext)s", downloadURL,
 		}
 	case ImageBest:
+		if info.DirectImageURL != "" {
+			downloadURL = info.DirectImageURL
+		}
 		cmdArgs = []string{
 			"-v", "--no-playlist", "--restrict-filenames",
-			"-o", outputTemplateBase + ".%(ext)s", urlStr,
+			"-o", outputTemplateBase + ".%(ext)s", downloadURL,
 		}
 	default:
 		return "", "", fmt.Errorf("[%s] unknown download type requested", username)
