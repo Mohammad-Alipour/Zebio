@@ -80,12 +80,18 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		Creator      string `json:"creator"`
 		Uploader     string `json:"uploader"`
 		Thumbnail    string `json:"thumbnail"`
+		DisplayURL   string `json:"display_url"`
+		URL          string `json:"url"`
 		Ext          string `json:"ext"`
 		Vcodec       string `json:"vcodec"`
 		ExtractorKey string `json:"extractor_key"`
 		Filename     string `json:"_filename"`
 		WebpageURL   string `json:"webpage_url"`
-		URL          string `json:"url"`
+		Thumbnails   []struct {
+			URL    string `json:"url"`
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+		} `json:"thumbnails"`
 	}
 
 	if err := json.Unmarshal(jsonData.Bytes(), &data); err != nil {
@@ -125,10 +131,24 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 
 	if data.ExtractorKey == "Instagram" && !info.HasVideo {
 		info.HasImage = true
-		info.DirectImageURL = data.URL
+		if data.DisplayURL != "" {
+			info.DirectImageURL = data.DisplayURL
+		} else if data.URL != "" && (strings.HasSuffix(data.URL, ".jpg") || strings.HasSuffix(data.URL, ".jpeg")) {
+			info.DirectImageURL = data.URL
+		} else if len(data.Thumbnails) > 0 {
+			var bestThumbnailURL string
+			var maxWidth int = 0
+			for _, t := range data.Thumbnails {
+				if t.Width > maxWidth {
+					maxWidth = t.Width
+					bestThumbnailURL = t.URL
+				}
+			}
+			info.DirectImageURL = bestThumbnailURL
+		}
 	}
 
-	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage)
+	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t, DirectImageURL: %s\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage, info.DirectImageURL)
 	return info, nil
 }
 
