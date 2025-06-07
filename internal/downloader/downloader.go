@@ -36,6 +36,7 @@ type TrackInfo struct {
 	OriginalURL    string
 	HasVideo       bool
 	HasImage       bool
+	IsAudioOnly    bool
 	DirectImageURL string
 }
 
@@ -84,6 +85,7 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		URL          string `json:"url"`
 		Ext          string `json:"ext"`
 		Vcodec       string `json:"vcodec"`
+		Acodec       string `json:"acodec"`
 		ExtractorKey string `json:"extractor_key"`
 		Filename     string `json:"_filename"`
 		WebpageURL   string `json:"webpage_url"`
@@ -148,7 +150,11 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		}
 	}
 
-	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t, DirectImageURL: %s\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage, info.DirectImageURL)
+	if !info.HasVideo && !info.HasImage && data.Acodec != "none" && data.Acodec != "" {
+		info.IsAudioOnly = true
+	}
+
+	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t, IsAudioOnly: %t\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage, info.IsAudioOnly)
 	return info, nil
 }
 

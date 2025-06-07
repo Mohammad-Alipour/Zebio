@@ -75,7 +75,8 @@ func (b *Bot) sendJoinChannelMessage(chatID int64, channelUsername string, reply
 		reply.ReplyToMessageID = replyToMessageID
 	}
 	joinButton := tgbotapi.NewInlineKeyboardButtonURL("عضویت در کانال 🚀", channelLink)
-	_ = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(joinButton))
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(joinButton))
+	reply.ReplyMarkup = keyboard
 	if _, err := b.api.Send(reply); err != nil {
 		log.Printf("Error sending 'please join channel' message to chat %d: %v", chatID, err)
 	}
@@ -273,10 +274,14 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 		photoButton := tgbotapi.NewInlineKeyboardButtonData("دانلود عکس 🖼️", fmt.Sprintf("dltype:photo:%d", message.MessageID))
 		buttons = append(buttons, photoButton)
 	}
+	if trackInfo.IsAudioOnly {
+		audioButton := tgbotapi.NewInlineKeyboardButtonData("دانلود صدا 🎵", fmt.Sprintf("dltype:audio:%d", message.MessageID))
+		buttons = append(buttons, audioButton)
+	}
 
 	if len(buttons) == 0 {
-		log.Printf("[%s] No downloadable content type (video/image) found for URL %s. Informing user.", userIdentifier, urlToDownload)
-		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "محتوای قابل دانلودی \\(ویدیو یا عکس\\) در این لینک پیدا نشد\\.")
+		log.Printf("[%s] No downloadable content type found for URL %s. Informing user.", userIdentifier, urlToDownload)
+		errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "محتوای قابل دانلودی \\(ویدیو، صدا یا عکس\\) در این لینک پیدا نشد\\.")
 		errMsg := tgbotapi.NewMessage(chatID, errMsgText)
 		errMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		errMsg.ReplyToMessageID = message.MessageID
