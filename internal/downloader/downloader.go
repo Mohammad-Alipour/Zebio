@@ -34,10 +34,49 @@ type TrackInfo struct {
 	Extension      string
 	Filename       string
 	OriginalURL    string
+	URL            string
 	HasVideo       bool
 	HasImage       bool
 	IsAudioOnly    bool
 	DirectImageURL string
+}
+
+type LinkInfo struct {
+	Type        string
+	Title       string
+	Uploader    string
+	Tracks      []*TrackInfo
+	OriginalURL string
+}
+
+type ytdlpJSONEntry struct {
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	Artist       string `json:"artist"`
+	Creator      string `json:"creator"`
+	Uploader     string `json:"uploader"`
+	Thumbnail    string `json:"thumbnail"`
+	DisplayURL   string `json:"display_url"`
+	URL          string `json:"url"`
+	Ext          string `json:"ext"`
+	Vcodec       string `json:"vcodec"`
+	Acodec       string `json:"acodec"`
+	ExtractorKey string `json:"extractor_key"`
+	Filename     string `json:"_filename"`
+	WebpageURL   string `json:"webpage_url"`
+	Thumbnails   []struct {
+		URL    string `json:"url"`
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
+	} `json:"thumbnails"`
+}
+
+type ytdlpPlaylistJSON struct {
+	Type       string           `json:"_type"`
+	Title      string           `json:"title"`
+	Uploader   string           `json:"uploader"`
+	WebpageURL string           `json:"webpage_url"`
+	Entries    []ytdlpJSONEntry `json:"entries"`
 }
 
 func New(cfg *config.Config) (*Downloader, error) {
@@ -56,10 +95,15 @@ func New(cfg *config.Config) (*Downloader, error) {
 	}, nil
 }
 
-func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, error) {
-	log.Printf("[%s] Fetching track info for URL: %s\n", username, urlStr)
+func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, error) {
+	log.Printf("[%s] Fetching link info for URL: %s\n", username, urlStr)
 
-	cmd := exec.Command(d.ytDLPPath, "-J", "--no-playlist", "-i", urlStr)
+	var cmd *exec.Cmd
+	if strings.Contains(urlStr, "soundcloud.com") {
+		cmd = exec.Command(d.ytDLPPath, "-J", "-i", "--flat-playlist", urlStr)
+	} else {
+		cmd = exec.Command(d.ytDLPPath, "-J", "-i", "--no-playlist", urlStr)
+	}
 
 	var jsonData bytes.Buffer
 	var stderrBuf bytes.Buffer
@@ -80,32 +124,40 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		return nil, fmt.Errorf("[%s] yt-dlp returned no JSON data for %s", username, urlStr)
 	}
 
-	var data struct {
-		ID           string `json:"id"`
-		Title        string `json:"title"`
-		Artist       string `json:"artist"`
-		Creator      string `json:"creator"`
-		Uploader     string `json:"uploader"`
-		Thumbnail    string `json:"thumbnail"`
-		DisplayURL   string `json:"display_url"`
-		URL          string `json:"url"`
-		Ext          string `json:"ext"`
-		Vcodec       string `json:"vcodec"`
-		Acodec       string `json:"acodec"`
-		ExtractorKey string `json:"extractor_key"`
-		Filename     string `json:"_filename"`
-		WebpageURL   string `json:"webpage_url"`
-		Thumbnails   []struct {
-			URL    string `json:"url"`
-			Width  int    `json:"width"`
-			Height int    `json:"height"`
-		} `json:"thumbnails"`
+	var output ytdlpPlaylistJSON
+	if err := json.Unmarshal(jsonData.Bytes(), &output); err != nil {
+		return nil, fmt.Errorf("[%s] failed to unmarshal yt-dlp JSON for %s: %w", username, urlStr, err)
 	}
 
-	if err := json.Unmarshal(jsonData.Bytes(), &data); err != nil {
-		return nil, fmt.Errorf("[%s] failed to unmarshal track info JSON for %s: %w", username, urlStr, err)
+	linkInfo := &LinkInfo{}
+	if output.Type == "playlist" {
+		linkInfo.Type = "album"
+		linkInfo.Title = output.Title
+		linkInfo.Uploader = output.Uploader
+		linkInfo.OriginalURL = output.WebpageURL
+		for _, entryData := range output.Entries {
+			track := parseTrackInfoFromData(entryData)
+			linkInfo.Tracks = append(linkInfo.Tracks, track)
+		}
+		log.Printf("[%s] Album/Playlist info fetched: Title: '%s', Track Count: %d\n", username, linkInfo.Title, len(linkInfo.Tracks))
+	} else {
+		var singleEntry ytdlpJSONEntry
+		if err := json.Unmarshal(jsonData.Bytes(), &singleEntry); err != nil {
+			return nil, fmt.Errorf("[%s] failed to unmarshal single track JSON for %s: %w", username, urlStr, err)
+		}
+		track := parseTrackInfoFromData(singleEntry)
+		linkInfo.Type = "track"
+		linkInfo.Title = track.Title
+		linkInfo.Uploader = track.Artist
+		linkInfo.OriginalURL = track.OriginalURL
+		linkInfo.Tracks = append(linkInfo.Tracks, track)
+		log.Printf("[%s] Single track info fetched: Title: '%s', Artist: '%s'\n", username, track.Title, track.Artist)
 	}
 
+	return linkInfo, nil
+}
+
+func parseTrackInfoFromData(data ytdlpJSONEntry) *TrackInfo {
 	info := &TrackInfo{
 		Title:        data.Title,
 		Artist:       data.Artist,
@@ -113,6 +165,7 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		Extension:    data.Ext,
 		Filename:     data.Filename,
 		OriginalURL:  data.WebpageURL,
+		URL:          data.URL,
 	}
 
 	if info.Artist == "" {
@@ -160,8 +213,7 @@ func (d *Downloader) GetTrackInfo(urlStr string, username string) (*TrackInfo, e
 		info.IsAudioOnly = true
 	}
 
-	log.Printf("[%s] Track info fetched: Title: '%s', Artist: '%s', HasVideo: %t, HasImage: %t, IsAudioOnly: %t, DirectImageURL: %s\n", username, info.Title, info.Artist, info.HasVideo, info.HasImage, info.IsAudioOnly, info.DirectImageURL)
-	return info, nil
+	return info
 }
 
 func (d *Downloader) DownloadMedia(urlStr string, username string, prefType DownloadType, info *TrackInfo) (string, string, error) {
@@ -173,6 +225,9 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 	outputTemplateBase := filepath.Join(d.downloadDir, outputFilename)
 
 	downloadURL := urlStr
+	if info.URL != "" {
+		downloadURL = info.URL
+	}
 
 	switch prefType {
 	case AudioOnly:
