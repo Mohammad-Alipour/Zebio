@@ -233,7 +233,7 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 	urlToDownload := message.Text
 	userIdentifier := userName + "_" + strconv.FormatInt(userID, 10)
 
-	log.Printf("[%s] Received link to process: %s\n", userIdentifier, urlToDownload)
+	log.Printf("[%s] [DEBUG] 1. Entering handleLink for: %s", userIdentifier, urlToDownload)
 
 	processingMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🔍 در حال بررسی و دریافت اطلاعات از لینک شما... لطفاً چند لحظه صبر کنید.")
 	processingMsg := tgbotapi.NewMessage(chatID, processingMsgText)
@@ -244,9 +244,10 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 		log.Printf("[%s] Error sending 'fetching link info' message: %v", userIdentifier, err)
 	}
 
+	log.Printf("[%s] [DEBUG] 2. Calling GetLinkInfo...", userIdentifier)
 	linkInfo, err := b.downloader.GetLinkInfo(urlToDownload, userIdentifier)
 	if err != nil {
-		log.Printf("[%s] Error fetching link info for URL %s: %v\n", userIdentifier, urlToDownload, err)
+		log.Printf("[%s] [DEBUG] Error from GetLinkInfo: %v", userIdentifier, err)
 		escapedError := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, err.Error())
 		errorMsgText := fmt.Sprintf("⚠️ متاسفانه در پردازش اولیه لینک شما مشکلی پیش آمد\\.\n\nعلت خطا:\n`%s`\n\nلطفاً از صحت لینک مطمئن شوید یا لینک دیگری را امتحان کنید\\. اگر مشکل ادامه داشت، بعداً دوباره تلاش کنید\\.", escapedError)
 		errMsg := tgbotapi.NewMessage(chatID, errorMsgText)
@@ -258,12 +259,15 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 		}
 		return
 	}
+	log.Printf("[%s] [DEBUG] 3. GetLinkInfo successful. Type: %s, Tracks: %d", userIdentifier, linkInfo.Type, len(linkInfo.Tracks))
 
 	if sentPInfoMsg.MessageID != 0 {
+		log.Printf("[%s] [DEBUG] 4. Deleting 'processing' message...", userIdentifier)
 		b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
 	}
 
 	if linkInfo.Type == "album" && len(linkInfo.Tracks) > 0 {
+		log.Printf("[%s] [DEBUG] 5a. Link is an album. Preparing confirmation message.", userIdentifier)
 		escapedTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, linkInfo.Title)
 		escapedUploader := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, linkInfo.Uploader)
 		albumMsgText := fmt.Sprintf("آلبوم یا پلی‌لیست پیدا شد:\n*%s*\nتوسط: `%s`\nتعداد آهنگ‌ها: *%d*\n\nآیا می‌خواهید تمام آهنگ‌ها دانلود شوند؟", escapedTitle, escapedUploader, len(linkInfo.Tracks))
@@ -275,10 +279,12 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 		albumMsg.ReplyToMessageID = message.MessageID
 		albumMsg.ReplyMarkup = keyboard
 		b.api.Send(albumMsg)
+		log.Printf("[%s] [DEBUG] 5b. Album confirmation message sent.", userIdentifier)
 		return
 	}
 
 	if linkInfo.Type == "track" && len(linkInfo.Tracks) == 1 {
+		log.Printf("[%s] [DEBUG] 6a. Link is a single track. Preparing options.", userIdentifier)
 		trackInfo := linkInfo.Tracks[0]
 		var buttons []tgbotapi.InlineKeyboardButton
 
@@ -324,10 +330,11 @@ func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int6
 		if _, err := b.api.Send(choiceMsg); err != nil {
 			log.Printf("[%s] Error sending download type choice message: %v", userIdentifier, err)
 		}
+		log.Printf("[%s] [DEBUG] 6b. Single track options sent.", userIdentifier)
 		return
 	}
 
-	log.Printf("[%s] Link type was not 'album' or 'track', or track list was empty. URL: %s", userIdentifier, urlToDownload)
+	log.Printf("[%s] [DEBUG] 7. Fallback: Link type was not 'album' or 'track'. URL: %s", userIdentifier, urlToDownload)
 	errMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "نوع لینک ارسال شده پشتیبانی نمی‌شود یا محتوایی در آن یافت نشد\\.")
 	errMsg := tgbotapi.NewMessage(chatID, errMsgText)
 	errMsg.ParseMode = tgbotapi.ModeMarkdownV2
@@ -342,27 +349,31 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 	userIdentifier := userName + "_" + strconv.FormatInt(userID, 10)
 	parts := strings.Split(callback.Data, ":")
 
-	if len(parts) > 0 && parts[0] == "dlalbum" {
+	if len(parts) > 1 && parts[0] == "dlalbum" {
 		action := parts[1]
 		if action == "no" {
-			deleteMsg := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
-			b.api.Send(deleteMsg)
+			log.Printf("[%s] User cancelled album download.", userIdentifier)
+			b.api.Send(tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID))
 			return
 		}
 
 		if action == "yes" {
+			log.Printf("[%s] User confirmed album download.", userIdentifier)
 			originalLinkURL := strings.Join(parts[2:], ":")
-			editMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ بسیار خب\\! فرآیند دانلود تمام آهنگ‌های آلبوم در پس‌زمینه آغاز شد\\.\nاین فرآیند ممکن است زمان‌بر باشد\\.\nگزارش پیشرفت به شما اطلاع داده خواهد شد\\.")
+
+			editMsgText := "✅ بسیار خب\\! فرآیند دانلود تمام آهنگ‌های آلبوم در پس‌زمینه آغاز شد\\.\nاین فرآیند ممکن است زمان‌بر باشد\\.\nگزارش پیشرفت به شما اطلاع داده خواهد شد\\."
 			editMsg := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, editMsgText)
 			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+			editMsg.ReplyMarkup = nil
 			b.api.Send(editMsg)
+
 			go b.processAlbumDownload(chatID, originalLinkURL, userIdentifier, userName, userID, fromFirstName, callback.Message.MessageID)
 		}
 		return
 	}
 
-	if len(parts) < 2 || parts[0] != "dltype" {
-		log.Printf("[%s] Invalid callback data format: %s\n", userIdentifier, callback.Data)
+	if len(parts) < 3 || parts[0] != "dltype" {
+		log.Printf("[%s] Invalid callback data format for single download: %s\n", userIdentifier, callback.Data)
 		return
 	}
 
@@ -420,13 +431,27 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 	}
 
 	totalTracks := len(linkInfo.Tracks)
+	escapedAlbumTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, linkInfo.Title)
+
 	for i, track := range linkInfo.Tracks {
-		progressText := fmt.Sprintf("در حال دانلود آهنگ %d از %d\n\n*%s*\n`%s`", i+1, totalTracks, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Title), tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Artist))
-		b.api.Send(tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText))
-		b.processDownloadRequest(chatID, 0, track.URL, downloader.AudioOnly, track, userName, userID, fromFirstName)
+		escapedTrackTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Title)
+		escapedTrackArtist := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Artist)
+
+		progressText := fmt.Sprintf("در حال دانلود آهنگ %d از %d\n\n💿 *%s*\n🎵 `%s \\- %s`", i+1, totalTracks, escapedAlbumTitle, escapedTrackArtist, escapedTrackTitle)
+
+		editMsg := tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
+		editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+		b.api.Send(editMsg)
+
+		downloadURL := track.URL
+		if track.OriginalURL != "" {
+			downloadURL = track.OriginalURL
+		}
+
+		b.processDownloadRequest(chatID, 0, downloadURL, downloader.AudioOnly, track, userName, userID, fromFirstName)
 	}
 
-	finalText := fmt.Sprintf("✅ دانلود تمام %d آهنگ از آلبوم *%s* با موفقیت به پایان رسید\\.", totalTracks, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, linkInfo.Title))
+	finalText := fmt.Sprintf("✅ دانلود تمام %d آهنگ از آلبوم *%s* با موفقیت به پایان رسید\\.", totalTracks, escapedAlbumTitle)
 	b.api.Send(tgbotapi.NewEditMessageText(chatID, statusMessageID, finalText))
 }
 
@@ -436,14 +461,14 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 	escapedTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, trackInfo.Title)
 	escapedFileType := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, typeToString(dlType))
 
-	downloadingMsgText := ""
-	if trackInfo.Title != "Unknown Title" && trackInfo.Artist != "Unknown Artist" {
-		downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* برای:\n`%s \\- %s`\n\nاین فرآیند ممکن است کمی طول بکشد، لطفاً صبور باشید\\.\\.\\. ⏳", escapedFileType, escapedArtist, escapedTitle)
+	if dlType == downloader.AudioOnly && originalLinkMessageID == 0 {
 	} else {
-		downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* شما\\.\\.\\. ⏳", escapedFileType)
-	}
-
-	if dlType != downloader.AudioOnly || originalLinkMessageID != 0 {
+		downloadingMsgText := ""
+		if trackInfo.Title != "Unknown Title" && trackInfo.Artist != "Unknown Artist" {
+			downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* برای:\n`%s \\- %s`\n\nاین فرآیند ممکن است کمی طول بکشد، لطفاً صبور باشید\\.\\.\\. ⏳", escapedFileType, escapedArtist, escapedTitle)
+		} else {
+			downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* شما\\.\\.\\. ⏳", escapedFileType)
+		}
 		dlNoticeMsg := tgbotapi.NewMessage(chatID, downloadingMsgText)
 		dlNoticeMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		if originalLinkMessageID != 0 {
