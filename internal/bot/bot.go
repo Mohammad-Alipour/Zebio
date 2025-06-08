@@ -450,7 +450,24 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 	totalTracks := len(linkInfo.Tracks)
 	escapedAlbumTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, linkInfo.Title)
 
-	for i, track := range linkInfo.Tracks {
+	for i, shallowTrack := range linkInfo.Tracks {
+		trackURL := shallowTrack.URL
+		if shallowTrack.OriginalURL != "" {
+			trackURL = shallowTrack.OriginalURL
+		}
+		if trackURL == "" {
+			log.Printf("[%s] Skipping track %d (%s) because its URL is empty in the album list.", userIdentifier, i+1, shallowTrack.Title)
+			continue
+		}
+
+		detailedLinkInfo, err := b.downloader.GetLinkInfo(trackURL, userIdentifier)
+		if err != nil || len(detailedLinkInfo.Tracks) == 0 {
+			log.Printf("[%s] Failed to fetch detailed info for track %d (%s): %v. Skipping.", userIdentifier, i+1, trackURL, err)
+			continue
+		}
+
+		track := detailedLinkInfo.Tracks[0]
+
 		escapedTrackTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Title)
 		escapedTrackArtist := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Artist)
 		progressText := fmt.Sprintf("در حال دانلود آهنگ %d از %d\n\n💿 *%s*\n🎵 `%s \\- %s`", i+1, totalTracks, escapedAlbumTitle, escapedTrackArtist, escapedTrackTitle)
@@ -458,16 +475,7 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 		editMsg.ParseMode = tgbotapi.ModeMarkdownV2
 		b.api.Send(editMsg)
 
-		downloadURL := track.URL
-		if track.OriginalURL != "" {
-			downloadURL = track.OriginalURL
-		}
-		if downloadURL == "" {
-			log.Printf("[%s] Skipping track %d (%s) because URL is empty.", userIdentifier, i+1, track.Title)
-			continue
-		}
-
-		b.processDownloadRequest(chatID, 0, downloadURL, downloader.AudioOnly, track, userName, userID, fromFirstName)
+		b.processDownloadRequest(chatID, 0, trackURL, downloader.AudioOnly, track, userName, userID, fromFirstName)
 	}
 
 	finalText := fmt.Sprintf("✅ دانلود تمام %d آهنگ از آلبوم *%s* با موفقیت به پایان رسید\\.", totalTracks, escapedAlbumTitle)
