@@ -250,18 +250,21 @@ func (d *Downloader) FindSoundCloudURL(query string, username string) (string, e
 		return "", fmt.Errorf("could not find a soundcloud track for query '%s': %w", query, err)
 	}
 
-	var data struct {
-		WebpageURL string `json:"webpage_url"`
+	var searchResult struct {
+		Entries []struct {
+			WebpageURL string `json:"webpage_url"`
+		} `json:"entries"`
 	}
-	if err := json.Unmarshal(jsonData.Bytes(), &data); err != nil {
+
+	if err := json.Unmarshal(jsonData.Bytes(), &searchResult); err != nil {
 		return "", fmt.Errorf("could not parse soundcloud search result: %w", err)
 	}
 
-	soundcloudURL := strings.TrimSpace(data.WebpageURL)
-	if soundcloudURL == "" {
-		return "", fmt.Errorf("yt-dlp SoundCloud search returned an empty webpage_url for query '%s'", query)
+	if len(searchResult.Entries) == 0 || searchResult.Entries[0].WebpageURL == "" {
+		return "", fmt.Errorf("yt-dlp SoundCloud search returned no results for query '%s'", query)
 	}
 
+	soundcloudURL := strings.TrimSpace(searchResult.Entries[0].WebpageURL)
 	log.Printf("[%s] SoundCloud search found URL: %s", username, soundcloudURL)
 	return soundcloudURL, nil
 }
