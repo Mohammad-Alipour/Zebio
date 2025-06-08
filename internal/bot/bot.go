@@ -305,24 +305,15 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 			b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
 		}
 
-		log.Printf("[%s] Found media URL: %s. Proceeding to download directly.", userIdentifier, foundURL)
+		log.Printf("[%s] Found media URL: %s. Now passing to handleLink to present options.", userIdentifier, foundURL)
 
-		var thumbnailURL string
-		if len(track.Album.Images) > 0 {
-			thumbnailURL = track.Album.Images[0].URL
-		}
+		newMessage := *message
+		newMessage.Text = foundURL
+		b.handleLink(&newMessage, userName, userID, fromFirstName)
+		return
+	}
 
-		spotifyTrackInfo := &downloader.TrackInfo{
-			Title:        track.Name,
-			Artist:       artistStr,
-			OriginalURL:  message.Text,
-			URL:          foundURL,
-			IsAudioOnly:  true,
-			ThumbnailURL: thumbnailURL,
-		}
-
-		go b.processDownloadRequest(chatID, message.MessageID, foundURL, downloader.AudioOnly, spotifyTrackInfo, userName, userID, fromFirstName)
-	} else if linkType == "album" || linkType == "playlist" {
+	if linkType == "album" || linkType == "playlist" {
 		var name string
 		var totalTracks int
 		var owner string
@@ -611,7 +602,7 @@ func (b *Bot) processSoundCloudAlbum(chatID int64, urlToDownload string, userIde
 	var downloadedFiles []downloadedFile
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := semaphore.NewWeighted(3)
+	sem := semaphore.NewWeighted(2)
 
 	for _, shallowTrack := range initialLinkInfo.Tracks {
 		wg.Add(1)
@@ -645,6 +636,14 @@ func (b *Bot) processSoundCloudAlbum(chatID int64, urlToDownload string, userIde
 
 			track := detailedLinkInfo.Tracks[0]
 
+			escapedTrackTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Title)
+			mu.Lock()
+			progressText = fmt.Sprintf("در حال دانلود آهنگ %d از %d\n*%s*", len(downloadedFiles)+1, totalTracks, escapedTrackTitle)
+			editMsg = tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
+			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+			b.api.Send(editMsg)
+			mu.Unlock()
+
 			downloadedFilePath, _, err := b.downloader.DownloadMedia(trackURL, userIdentifier, downloader.AudioOnly, track)
 			if err != nil {
 				log.Printf("[%s] Failed to download track %s: %v", userIdentifier, track.Title, err)
@@ -653,10 +652,6 @@ func (b *Bot) processSoundCloudAlbum(chatID int64, urlToDownload string, userIde
 
 			mu.Lock()
 			downloadedFiles = append(downloadedFiles, downloadedFile{FilePath: downloadedFilePath, TrackInfo: track})
-			progressText = fmt.Sprintf("تعداد %d از %d آهنگ با موفقیت دانلود شد.", len(downloadedFiles), totalTracks)
-			editMsg = tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
-			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
-			b.api.Send(editMsg)
 			mu.Unlock()
 
 		}(shallowTrack)
@@ -747,7 +742,7 @@ func (b *Bot) processSpotifyAlbum(chatID int64, linkType string, linkID spotify.
 	var downloadedFiles []downloadedFile
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := semaphore.NewWeighted(3)
+	sem := semaphore.NewWeighted(2)
 
 	for i, sTrack := range spotifyTracks {
 		wg.Add(1)
