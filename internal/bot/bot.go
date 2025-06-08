@@ -263,7 +263,9 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 	matches := re.FindStringSubmatch(message.Text)
 	if len(matches) < 3 {
 		log.Printf("[%s] Could not parse Spotify link type/ID from URL: %s", userIdentifier, message.Text)
-		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا: لینک اسپاتیفای معتبر به نظر نمی‌رسد."))
+		if sentPInfoMsg.MessageID != 0 {
+			b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا: لینک اسپاتیفای معتبر به نظر نمی‌رسد."))
+		}
 		return
 	}
 
@@ -653,6 +655,9 @@ func (b *Bot) processSoundCloudAlbum(chatID int64, urlToDownload string, userIde
 
 	wg.Wait()
 
+	if len(downloadedFiles) < totalTracks {
+		log.Printf("[%s] Some tracks failed to download for album: %s. Downloaded %d of %d.", userIdentifier, urlToDownload, len(downloadedFiles), totalTracks)
+	}
 	if len(downloadedFiles) == 0 {
 		log.Printf("[%s] All tracks failed to download for album: %s", userIdentifier, urlToDownload)
 		errorText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "متاسفانه دانلود هیچ یک از آهنگ‌های آلبوم موفقیت‌آمیز نبود.")
