@@ -332,7 +332,7 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 				artists = append(artists, artist.Name)
 			}
 			owner = strings.Join(artists, ", ")
-		} else { // playlist
+		} else {
 			playlist, err := b.spotify.GetPlaylist(context.Background(), linkID)
 			if err != nil {
 				log.Printf("[%s] Could not get playlist info from Spotify API: %v", userIdentifier, err)
