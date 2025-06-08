@@ -1,17 +1,20 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Mohammad-Alipour/Zebio/internal/config"
 	"github.com/Mohammad-Alipour/Zebio/internal/downloader"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"golang.org/x/sync/semaphore"
 )
 
 type Bot struct {
@@ -362,7 +365,7 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 				return
 			}
 
-			editMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ بسیار خب! فرآیند دانلود تمام آهنگ‌های آلبوم در پس‌زمینه آغاز شد. این فرآیند ممکن است زمان‌بر باشد. گزارش پیشرفت به شما اطلاع داده خواهد شد.")
+			editMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ بسیار خب! فرآیند دانلود آلبوم آغاز شد. این فرآیند ممکن است زمان‌بر باشد.")
 			editMsg := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, editMsgText)
 			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
 			editMsg.ReplyMarkup = nil
@@ -450,33 +453,50 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 	totalTracks := len(linkInfo.Tracks)
 	escapedAlbumTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, linkInfo.Title)
 
-	for i, shallowTrack := range linkInfo.Tracks {
-		trackURL := shallowTrack.URL
-		if shallowTrack.OriginalURL != "" {
-			trackURL = shallowTrack.OriginalURL
-		}
-		if trackURL == "" {
-			log.Printf("[%s] Skipping track %d (%s) because its URL is empty in the album list.", userIdentifier, i+1, shallowTrack.Title)
-			continue
-		}
+	var downloadedCount int
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := semaphore.NewWeighted(3)
 
-		detailedLinkInfo, err := b.downloader.GetLinkInfo(trackURL, userIdentifier)
-		if err != nil || len(detailedLinkInfo.Tracks) == 0 {
-			log.Printf("[%s] Failed to fetch detailed info for track %d (%s): %v. Skipping.", userIdentifier, i+1, trackURL, err)
-			continue
-		}
+	for _, shallowTrack := range linkInfo.Tracks {
+		wg.Add(1)
+		sem.Acquire(context.Background(), 1)
 
-		track := detailedLinkInfo.Tracks[0]
+		go func(trackToProcess *downloader.TrackInfo) {
+			defer wg.Done()
+			defer sem.Release(1)
 
-		escapedTrackTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Title)
-		escapedTrackArtist := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Artist)
-		progressText := fmt.Sprintf("در حال دانلود آهنگ %d از %d\n\n💿 *%s*\n🎵 `%s \\- %s`", i+1, totalTracks, escapedAlbumTitle, escapedTrackArtist, escapedTrackTitle)
-		editMsg := tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
-		editMsg.ParseMode = tgbotapi.ModeMarkdownV2
-		b.api.Send(editMsg)
+			trackURL := trackToProcess.URL
+			if trackToProcess.OriginalURL != "" {
+				trackURL = trackToProcess.OriginalURL
+			}
+			if trackURL == "" {
+				log.Printf("[%s] Skipping track (%s) because its URL is empty in the album list.", userIdentifier, trackToProcess.Title)
+				return
+			}
 
-		b.processDownloadRequest(chatID, 0, trackURL, downloader.AudioOnly, track, userName, userID, fromFirstName)
+			detailedLinkInfo, err := b.downloader.GetLinkInfo(trackURL, userIdentifier)
+			if err != nil || len(detailedLinkInfo.Tracks) == 0 {
+				log.Printf("[%s] Failed to fetch detailed info for track (%s): %v. Skipping.", userIdentifier, trackURL, err)
+				return
+			}
+
+			track := detailedLinkInfo.Tracks[0]
+
+			b.processDownloadRequest(chatID, 0, trackURL, downloader.AudioOnly, track, userName, userID, fromFirstName)
+
+			mu.Lock()
+			downloadedCount++
+			progressText := fmt.Sprintf("تعداد %d از %d آهنگ با موفقیت دانلود و ارسال شد.", downloadedCount, totalTracks)
+			editMsg := tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
+			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+			b.api.Send(editMsg)
+			mu.Unlock()
+
+		}(shallowTrack)
 	}
+
+	wg.Wait()
 
 	finalText := fmt.Sprintf("✅ دانلود تمام %d آهنگ از آلبوم *%s* با موفقیت به پایان رسید\\.", totalTracks, escapedAlbumTitle)
 	b.api.Send(tgbotapi.NewEditMessageText(chatID, statusMessageID, finalText))
