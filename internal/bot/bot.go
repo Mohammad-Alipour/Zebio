@@ -292,18 +292,22 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 	searchQuery := fmt.Sprintf("%s - %s", artistStr, track.Name)
 
 	b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ اطلاعات آهنگ دریافت شد. در حال جستجوی آهنگ در یوتیوب...")))
-
-	youtubeURL, err := b.downloader.FindYouTubeURL(searchQuery, userIdentifier)
+	foundURL, err := b.downloader.FindYouTubeURL(searchQuery, userIdentifier)
 	if err != nil {
-		log.Printf("[%s] Could not find YouTube URL for query '%s': %v", userIdentifier, searchQuery, err)
-		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "متاسفانه آهنگ مورد نظر در یوتیوب پیدا نشد."))
-		return
+		log.Printf("[%s] Could not find on YouTube, trying SoundCloud... Query: '%s'", userIdentifier, searchQuery)
+		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "در یوتیوب پیدا نشد. در حال جستجو در ساندکلود...")))
+		foundURL, err = b.downloader.FindSoundCloudURL(searchQuery, userIdentifier)
+		if err != nil {
+			log.Printf("[%s] Could not find on YouTube or SoundCloud for query '%s': %v", userIdentifier, searchQuery, err)
+			b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "متاسفانه آهنگ مورد نظر در یوتیوب و ساندکلود پیدا نشد."))
+			return
+		}
 	}
 
-	log.Printf("[%s] Found YouTube URL: %s. Now passing to handleLink.", userIdentifier, youtubeURL)
+	log.Printf("[%s] Found media URL: %s. Now passing to handleLink.", userIdentifier, foundURL)
 	b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
 
-	message.Text = youtubeURL
+	message.Text = foundURL
 	b.handleLink(message, userName, userID, fromFirstName)
 }
 

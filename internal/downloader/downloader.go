@@ -224,17 +224,39 @@ func (d *Downloader) FindYouTubeURL(query string, username string) (string, erro
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		log.Printf("[%s] yt-dlp search failed. STDERR: %s", username, stderr.String())
+		log.Printf("[%s] yt-dlp Youtube failed. STDERR: %s", username, stderr.String())
 		return "", fmt.Errorf("could not find a youtube video for query '%s': %w", query, err)
 	}
 
 	youtubeURL := strings.TrimSpace(stdout.String())
 	if youtubeURL == "" {
-		return "", fmt.Errorf("yt-dlp search returned an empty URL for query '%s'", query)
+		return "", fmt.Errorf("yt-dlp Youtube returned an empty URL for query '%s'", query)
 	}
 
 	log.Printf("[%s] Youtube found URL: %s", username, youtubeURL)
 	return youtubeURL, nil
+}
+
+func (d *Downloader) FindSoundCloudURL(query string, username string) (string, error) {
+	log.Printf("[%s] Searching on SoundCloud for: %s", username, query)
+	cmd := exec.Command(d.ytDLPPath, "--get-url", fmt.Sprintf("scsearch1:%s", query))
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		log.Printf("[%s] yt-dlp SoundCloud search failed. STDERR: %s", username, stderr.String())
+		return "", fmt.Errorf("could not find a soundcloud track for query '%s': %w", query, err)
+	}
+
+	soundcloudURL := strings.TrimSpace(stdout.String())
+	if soundcloudURL == "" {
+		return "", fmt.Errorf("yt-dlp SoundCloud search returned an empty URL for query '%s'", query)
+	}
+
+	log.Printf("[%s] SoundCloud search found URL: %s", username, soundcloudURL)
+	return soundcloudURL, nil
 }
 
 func (d *Downloader) DownloadMedia(urlStr string, username string, prefType DownloadType, info *TrackInfo) (string, string, error) {
