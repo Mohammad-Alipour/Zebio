@@ -24,8 +24,9 @@ const (
 )
 
 type Downloader struct {
-	ytDLPPath   string
-	downloadDir string
+	ytDLPPath          string
+	downloadDir        string
+	youTubeCookiesPath string
 }
 
 type TrackInfo struct {
@@ -91,23 +92,31 @@ func New(cfg *config.Config) (*Downloader, error) {
 		return nil, fmt.Errorf("error checking download directory '%s': %w", cfg.DownloadDir, err)
 	}
 	return &Downloader{
-		ytDLPPath:   cfg.YTDLPPath,
-		downloadDir: cfg.DownloadDir,
+		ytDLPPath:          cfg.YTDLPPath,
+		downloadDir:        cfg.DownloadDir,
+		youTubeCookiesPath: cfg.YouTubeCookiesPath,
 	}, nil
 }
 
 func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, error) {
-	log.Printf("[%s] Fetching link info for URL: %s", username, urlStr)
+	log.Printf("[%s] Fetching link info for URL: %s\n", username, urlStr)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	var cmd *exec.Cmd
-	if strings.Contains(urlStr, "soundcloud.com") && (strings.Contains(urlStr, "/sets/") || strings.Contains(urlStr, "/playlists/")) {
-		cmd = exec.CommandContext(ctx, d.ytDLPPath, "-J", "-i", "--flat-playlist", urlStr)
-	} else {
-		cmd = exec.CommandContext(ctx, d.ytDLPPath, "-J", "-i", "--no-playlist", urlStr)
+	baseArgs := []string{"-J", "-i"}
+	if d.youTubeCookiesPath != "" && strings.Contains(urlStr, "youtu") {
+		baseArgs = append(baseArgs, "--cookies", d.youTubeCookiesPath)
 	}
+
+	var finalArgs []string
+	if strings.Contains(urlStr, "soundcloud.com") && (strings.Contains(urlStr, "/sets/") || strings.Contains(urlStr, "/playlists/")) {
+		finalArgs = append(baseArgs, "--flat-playlist", urlStr)
+	} else {
+		finalArgs = append(baseArgs, "--no-playlist", urlStr)
+	}
+
+	cmd := exec.CommandContext(ctx, d.ytDLPPath, finalArgs...)
 
 	var jsonData bytes.Buffer
 	var stderrBuf bytes.Buffer
@@ -226,7 +235,13 @@ func (d *Downloader) FindYouTubeURL(query string, username string) (string, erro
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, d.ytDLPPath, "--get-url", fmt.Sprintf("ytsearch1:%s", query))
+	args := []string{}
+	if d.youTubeCookiesPath != "" {
+		args = append(args, "--cookies", d.youTubeCookiesPath)
+	}
+	args = append(args, "--get-url", fmt.Sprintf("ytsearch1:%s", query))
+
+	cmd := exec.CommandContext(ctx, d.ytDLPPath, args...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -294,7 +309,6 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	var cmdArgs []string
 	outputFilename := fmt.Sprintf("%s - %s", info.Artist, info.Title)
 	outputTemplateBase := filepath.Join(d.downloadDir, outputFilename)
 
@@ -303,27 +317,22 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 		downloadURL = info.URL
 	}
 
+	baseArgs := []string{"-v", "--no-playlist"}
+	if d.youTubeCookiesPath != "" && strings.Contains(downloadURL, "youtu") {
+		baseArgs = append(baseArgs, "--cookies", d.youTubeCookiesPath)
+	}
+
+	var cmdArgs []string
 	switch prefType {
 	case AudioOnly:
-		cmdArgs = []string{
-			"-v", "--no-playlist", "-f", "bestaudio/best", "--extract-audio",
-			"--audio-format", "mp3", "--restrict-filenames", "--embed-thumbnail",
-			"-o", outputTemplateBase + ".%(ext)s", downloadURL,
-		}
+		cmdArgs = append(baseArgs, "-f", "bestaudio/best", "--extract-audio", "--audio-format", "mp3", "--restrict-filenames", "--embed-thumbnail", "-o", outputTemplateBase+".%(ext)s", downloadURL)
 	case VideoBest:
-		cmdArgs = []string{
-			"-v", "--no-playlist", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-			"--merge-output-format", "mp4", "--restrict-filenames", "--embed-thumbnail",
-			"-o", outputTemplateBase + ".%(ext)s", downloadURL,
-		}
+		cmdArgs = append(baseArgs, "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "--merge-output-format", "mp4", "--restrict-filenames", "--embed-thumbnail", "-o", outputTemplateBase+".%(ext)s", downloadURL)
 	case ImageBest:
 		if info.DirectImageURL != "" {
 			downloadURL = info.DirectImageURL
 		}
-		cmdArgs = []string{
-			"-v", "--no-playlist", "--restrict-filenames",
-			"-o", outputTemplateBase + ".%(ext)s", downloadURL,
-		}
+		cmdArgs = append(baseArgs, "--restrict-filenames", "-o", outputTemplateBase+".%(ext)s", downloadURL)
 	default:
 		return "", "", fmt.Errorf("[%s] unknown download type requested", username)
 	}

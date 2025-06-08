@@ -15,6 +15,7 @@ type Config struct {
 	ForceJoinChannel    string
 	SpotifyClientID     string
 	SpotifyClientSecret string
+	YouTubeCookiesPath  string
 }
 
 func Load() (*Config, error) {
@@ -73,6 +74,13 @@ func Load() (*Config, error) {
 		log.Println("Spotify ClientID and ClientSecret loaded successfully.")
 	}
 
+	youTubeCookiesPath := os.Getenv("YOUTUBE_COOKIES_PATH")
+	if youTubeCookiesPath != "" {
+		log.Printf("YouTube cookies file path loaded: %s\n", youTubeCookiesPath)
+	} else {
+		log.Println("Warning: YOUTUBE_COOKIES_PATH not set. Youtubees may fail due to bot detection.")
+	}
+
 	return &Config{
 		TelegramBotToken:    token,
 		YTDLPPath:           ytDlpPath,
@@ -81,5 +89,6 @@ func Load() (*Config, error) {
 		ForceJoinChannel:    forceJoinChannel,
 		SpotifyClientID:     spotifyClientID,
 		SpotifyClientSecret: spotifyClientSecret,
+		YouTubeCookiesPath:  youTubeCookiesPath,
 	}, nil
 }
