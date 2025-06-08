@@ -305,15 +305,24 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 			b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
 		}
 
-		log.Printf("[%s] Found media URL: %s. Now passing to handleLink to present options.", userIdentifier, foundURL)
+		log.Printf("[%s] Found media URL: %s. Proceeding to download directly.", userIdentifier, foundURL)
 
-		newMessage := *message
-		newMessage.Text = foundURL
-		b.handleLink(&newMessage, userName, userID, fromFirstName)
-		return
-	}
+		var thumbnailURL string
+		if len(track.Album.Images) > 0 {
+			thumbnailURL = track.Album.Images[0].URL
+		}
 
-	if linkType == "album" || linkType == "playlist" {
+		spotifyTrackInfo := &downloader.TrackInfo{
+			Title:        track.Name,
+			Artist:       artistStr,
+			OriginalURL:  message.Text,
+			URL:          foundURL,
+			IsAudioOnly:  true,
+			ThumbnailURL: thumbnailURL,
+		}
+
+		go b.processDownloadRequest(chatID, message.MessageID, foundURL, downloader.AudioOnly, spotifyTrackInfo, userName, userID, fromFirstName)
+	} else if linkType == "album" || linkType == "playlist" {
 		var name string
 		var totalTracks int
 		var owner string
@@ -738,7 +747,7 @@ func (b *Bot) processSpotifyAlbum(chatID int64, linkType string, linkID spotify.
 	var downloadedFiles []downloadedFile
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := semaphore.NewWeighted(2)
+	sem := semaphore.NewWeighted(3)
 
 	for i, sTrack := range spotifyTracks {
 		wg.Add(1)
