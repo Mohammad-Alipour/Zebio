@@ -97,9 +97,9 @@ func New(cfg *config.Config) (*Downloader, error) {
 }
 
 func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, error) {
-	log.Printf("[%s] Fetching link info for URL: %s\n", username, urlStr)
+	log.Printf("[%s] Fetching link info for URL: %s", username, urlStr)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
 	var cmd *exec.Cmd
@@ -160,7 +160,6 @@ func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, err
 		OriginalURL: track.OriginalURL,
 		Tracks:      []*TrackInfo{track},
 	}
-	log.Printf("[%s] Single track info fetched: Title: '%s', Artist: '%s'\n", username, track.Title, track.Artist)
 	return linkInfo, nil
 }
 
