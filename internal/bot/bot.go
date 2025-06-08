@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -417,10 +418,26 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 		return
 	}
 
-	b.processDownloadRequest(chatID, originalLinkMessageID, linkInfo.Tracks[0].URL, dlType, linkInfo.Tracks[0], userName, userID, fromFirstName)
+	downloadURL := linkInfo.Tracks[0].URL
+	if linkInfo.Tracks[0].OriginalURL != "" {
+		downloadURL = linkInfo.Tracks[0].OriginalURL
+	}
+	if downloadURL == "" {
+		downloadURL = originalLinkURL
+	}
+
+	b.processDownloadRequest(chatID, originalLinkMessageID, downloadURL, dlType, linkInfo.Tracks[0], userName, userID, fromFirstName)
 }
 
 func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdentifier string, userName string, userID int64, fromFirstName string, statusMessageID int) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[%s] RECOVERED from panic in processAlbumDownload: %v\n%s", userIdentifier, r, string(debug.Stack()))
+			errorText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "❌ یک خطای داخلی بسیار جدی در حین دانلود آلبوم رخ داد و فرآیند متوقف شد.")
+			b.api.Send(tgbotapi.NewEditMessageText(chatID, statusMessageID, errorText))
+		}
+	}()
+
 	log.Printf("[%s] Starting album download process for URL: %s", userIdentifier, urlToDownload)
 	linkInfo, err := b.downloader.GetLinkInfo(urlToDownload, userIdentifier)
 	if err != nil || linkInfo.Type != "album" || len(linkInfo.Tracks) == 0 {
