@@ -738,7 +738,7 @@ func (b *Bot) processSpotifyAlbum(chatID int64, linkType string, linkID spotify.
 	var downloadedFiles []downloadedFile
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := semaphore.NewWeighted(3)
+	sem := semaphore.NewWeighted(2)
 
 	for i, sTrack := range spotifyTracks {
 		wg.Add(1)
