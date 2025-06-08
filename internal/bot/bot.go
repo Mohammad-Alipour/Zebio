@@ -289,9 +289,10 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 		artists = append(artists, artist.Name)
 	}
 	artistStr := strings.Join(artists, ", ")
-	searchQuery := fmt.Sprintf("%s - %s", artistStr, track.Name)
+	searchQuery := fmt.Sprintf("%s %s", artistStr, track.Name)
 
 	b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ اطلاعات آهنگ دریافت شد. در حال جستجوی آهنگ در یوتیوب...")))
+
 	foundURL, err := b.downloader.FindYouTubeURL(searchQuery, userIdentifier)
 	if err != nil {
 		log.Printf("[%s] Could not find on YouTube, trying SoundCloud... Query: '%s'", userIdentifier, searchQuery)
@@ -304,11 +305,15 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 		}
 	}
 
-	log.Printf("[%s] Found media URL: %s. Now passing to handleLink.", userIdentifier, foundURL)
-	b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
+	if sentPInfoMsg.MessageID != 0 {
+		b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
+	}
 
-	message.Text = foundURL
-	b.handleLink(message, userName, userID, fromFirstName)
+	log.Printf("[%s] Found media URL: %s. Now passing to handleLink to present options.", userIdentifier, foundURL)
+
+	newMessage := *message
+	newMessage.Text = foundURL
+	b.handleLink(&newMessage, userName, userID, fromFirstName)
 }
 
 func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int64, fromFirstName string) {
