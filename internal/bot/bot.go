@@ -268,58 +268,96 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 	}
 
 	linkType := matches[1]
-	linkID := matches[2]
+	linkID := spotify.ID(matches[2])
 
-	if linkType != "track" {
-		log.Printf("[%s] Spotify link type '%s' is not supported yet.", userIdentifier, linkType)
-		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "در حال حاضر فقط لینک آهنگ (track) از اسپاتیفای پشتیبانی می‌شود."))
-		return
-	}
-
-	trackID := spotify.ID(linkID)
-	track, err := b.spotify.GetTrack(context.Background(), trackID)
-	if err != nil {
-		log.Printf("[%s] Could not get track info from Spotify API: %v", userIdentifier, err)
-		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا در دریافت اطلاعات از API اسپاتیفای."))
-		return
-	}
-
-	var artists []string
-	for _, artist := range track.Artists {
-		artists = append(artists, artist.Name)
-	}
-	artistStr := strings.Join(artists, ", ")
-	searchQuery := fmt.Sprintf("%s - %s", artistStr, track.Name)
-
-	b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ اطلاعات آهنگ دریافت شد. در حال جستجوی آهنگ در یوتیوب...")))
-
-	foundURL, err := b.downloader.FindYouTubeURL(searchQuery, userIdentifier)
-	if err != nil {
-		log.Printf("[%s] Could not find on YouTube, trying SoundCloud... Query: '%s'", userIdentifier, searchQuery)
-		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "در یوتیوب پیدا نشد. در حال جستجو در ساندکلود...")))
-		foundURL, err = b.downloader.FindSoundCloudURL(searchQuery, userIdentifier)
+	if linkType == "track" {
+		track, err := b.spotify.GetTrack(context.Background(), linkID)
 		if err != nil {
-			log.Printf("[%s] Could not find on YouTube or SoundCloud for query '%s': %v", userIdentifier, searchQuery, err)
-			b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "متاسفانه آهنگ مورد نظر در یوتیوب و ساندکلود پیدا نشد."))
+			log.Printf("[%s] Could not get track info from Spotify API: %v", userIdentifier, err)
+			b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا در دریافت اطلاعات از API اسپاتیفای."))
 			return
 		}
+
+		var artists []string
+		for _, artist := range track.Artists {
+			artists = append(artists, artist.Name)
+		}
+		artistStr := strings.Join(artists, ", ")
+		searchQuery := fmt.Sprintf("%s - %s", artistStr, track.Name)
+
+		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ اطلاعات آهنگ دریافت شد. در حال جستجوی آهنگ جایگزین...")))
+
+		foundURL, err := b.downloader.FindYouTubeURL(searchQuery, userIdentifier)
+		if err != nil {
+			log.Printf("[%s] Could not find on YouTube, trying SoundCloud... Query: '%s'", userIdentifier, searchQuery)
+			b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "در یوتیوب پیدا نشد. در حال جستجو در ساندکلود...")))
+			foundURL, err = b.downloader.FindSoundCloudURL(searchQuery, userIdentifier)
+			if err != nil {
+				log.Printf("[%s] Could not find on YouTube or SoundCloud for query '%s': %v", userIdentifier, searchQuery, err)
+				b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "متاسفانه آهنگ مورد نظر در یوتیوب و ساندکلود پیدا نشد."))
+				return
+			}
+		}
+
+		if sentPInfoMsg.MessageID != 0 {
+			b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
+		}
+
+		log.Printf("[%s] Found media URL: %s. Now passing to handleLink to present options.", userIdentifier, foundURL)
+
+		newMessage := *message
+		newMessage.Text = foundURL
+		b.handleLink(&newMessage, userName, userID, fromFirstName)
+		return
 	}
 
-	if sentPInfoMsg.MessageID != 0 {
-		b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
+	if linkType == "album" || linkType == "playlist" {
+		var name string
+		var totalTracks int
+		var owner string
+
+		if linkType == "album" {
+			album, err := b.spotify.GetAlbum(context.Background(), linkID)
+			if err != nil {
+				log.Printf("[%s] Could not get album info from Spotify API: %v", userIdentifier, err)
+				b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا در دریافت اطلاعات آلبوم از API اسپاتیفای."))
+				return
+			}
+			name = album.Name
+			totalTracks = int(album.Tracks.Total)
+			var artists []string
+			for _, artist := range album.Artists {
+				artists = append(artists, artist.Name)
+			}
+			owner = strings.Join(artists, ", ")
+		} else { // playlist
+			playlist, err := b.spotify.GetPlaylist(context.Background(), linkID)
+			if err != nil {
+				log.Printf("[%s] Could not get playlist info from Spotify API: %v", userIdentifier, err)
+				b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا در دریافت اطلاعات پلی‌لیست از API اسپاتیفای."))
+				return
+			}
+			name = playlist.Name
+			totalTracks = int(playlist.Tracks.Total)
+			owner = playlist.Owner.DisplayName
+		}
+
+		if sentPInfoMsg.MessageID != 0 {
+			b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
+		}
+
+		escapedName := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, name)
+		escapedOwner := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, owner)
+		albumMsgText := fmt.Sprintf("آلبوم/پلی‌لیست اسپاتیفای پیدا شد:\n*%s*\nتوسط: `%s`\nتعداد آهنگ‌ها: *%d*\n\nبرای دانلود، هر آهنگ در یوتیوب/ساندکلود جستجو خواهد شد\\. این فرآیند ممکن است بسیار زمان‌بر باشد\\. ادامه می‌دهید؟", escapedName, escapedOwner, totalTracks)
+		yesButton := tgbotapi.NewInlineKeyboardButtonData("✅ بله، دانلود کن", fmt.Sprintf("spotifyalbum:yes:%s:%s", linkType, linkID))
+		noButton := tgbotapi.NewInlineKeyboardButtonData("❌ نه", "spotifyalbum:no")
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(yesButton, noButton))
+		albumMsg := tgbotapi.NewMessage(chatID, albumMsgText)
+		albumMsg.ParseMode = tgbotapi.ModeMarkdownV2
+		albumMsg.ReplyToMessageID = message.MessageID
+		albumMsg.ReplyMarkup = keyboard
+		b.api.Send(albumMsg)
 	}
-
-	log.Printf("[%s] Found media URL: %s. Now processing download directly.", userIdentifier, foundURL)
-
-	spotifyTrackInfo := &downloader.TrackInfo{
-		Title:       track.Name,
-		Artist:      artistStr,
-		OriginalURL: message.Text,
-		URL:         foundURL,
-		IsAudioOnly: true,
-	}
-
-	go b.processDownloadRequest(chatID, message.MessageID, foundURL, downloader.AudioOnly, spotifyTrackInfo, userName, userID, fromFirstName)
 }
 
 func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int64, fromFirstName string) {
@@ -431,93 +469,107 @@ func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery, userName str
 	userIdentifier := userName + "_" + strconv.FormatInt(userID, 10)
 	parts := strings.Split(callback.Data, ":")
 
-	if len(parts) > 0 && parts[0] == "dlalbum" {
-		action := parts[1]
-		if action == "no" {
-			log.Printf("[%s] User cancelled album download.", userIdentifier)
-			b.api.Send(tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID))
-			return
-		}
-
-		if action == "yes" {
-			log.Printf("[%s] User confirmed album download.", userIdentifier)
-
-			var originalLinkURL string
-			if callback.Message != nil && callback.Message.ReplyToMessage != nil {
-				originalLinkURL = callback.Message.ReplyToMessage.Text
+	if len(parts) > 0 {
+		switch parts[0] {
+		case "dlalbum":
+			if len(parts) < 2 {
+				return
 			}
+			action := parts[1]
+			if action == "no" {
+				log.Printf("[%s] User cancelled album download.", userIdentifier)
+				b.api.Send(tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID))
+				return
+			}
+			if action == "yes" {
+				var originalLinkURL string
+				if callback.Message != nil && callback.Message.ReplyToMessage != nil {
+					originalLinkURL = callback.Message.ReplyToMessage.Text
+				}
+				if originalLinkURL == "" {
+					return
+				}
 
-			if originalLinkURL == "" {
-				log.Printf("[%s] Could not find original album link from callback reply.", userIdentifier)
-				b.api.Send(tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, "خطا: لینک اصلی آلبوم پیدا نشد."))
+				editMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ بسیار خب! فرآیند دانلود آلبوم ساندکلود آغاز شد...")
+				editMsg := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, editMsgText)
+				editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+				editMsg.ReplyMarkup = nil
+				b.api.Send(editMsg)
+
+				go b.processSoundCloudAlbum(chatID, originalLinkURL, userIdentifier, userName, userID, fromFirstName, callback.Message.MessageID)
+			}
+			return
+
+		case "spotifyalbum":
+			if len(parts) < 4 {
+				return
+			}
+			action := parts[1]
+			if action == "no" {
+				log.Printf("[%s] User cancelled Spotify album download.", userIdentifier)
+				b.api.Send(tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID))
+				return
+			}
+			if action == "yes" {
+				linkType := parts[2]
+				linkID := spotify.ID(parts[3])
+
+				editMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ بسیار خب! فرآیند دانلود آلبوم اسپاتیفای آغاز شد. این کار زمان‌بر خواهد بود...")
+				editMsg := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, editMsgText)
+				editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+				editMsg.ReplyMarkup = nil
+				b.api.Send(editMsg)
+
+				go b.processSpotifyAlbum(chatID, linkType, linkID, userIdentifier, userName, userID, fromFirstName, callback.Message.MessageID)
+			}
+			return
+
+		case "dltype":
+			if len(parts) < 3 {
+				return
+			}
+			originalLinkMessageID, _ := strconv.Atoi(parts[2])
+			var originalLinkURL string
+			if callback.Message.ReplyToMessage != nil {
+				originalLinkURL = callback.Message.ReplyToMessage.Text
+			} else {
 				return
 			}
 
-			editMsgText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ بسیار خب! فرآیند دانلود آلبوم آغاز شد. این فرآیند ممکن است زمان‌بر باشد...")
-			editMsg := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, editMsgText)
-			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
-			editMsg.ReplyMarkup = nil
-			b.api.Send(editMsg)
+			b.api.Send(tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID))
 
-			go b.processAlbumDownload(chatID, originalLinkURL, userIdentifier, userName, userID, fromFirstName, callback.Message.MessageID)
+			chosenTypeStr := parts[1]
+			var dlType downloader.DownloadType
+			switch chosenTypeStr {
+			case "audio":
+				dlType = downloader.AudioOnly
+			case "video":
+				dlType = downloader.VideoBest
+			case "photo":
+				dlType = downloader.ImageBest
+			default:
+				log.Printf("[%s] Unknown download type in callback: %s", userIdentifier, chosenTypeStr)
+				return
+			}
+
+			linkInfo, err := b.downloader.GetLinkInfo(originalLinkURL, userIdentifier)
+			if err != nil || len(linkInfo.Tracks) == 0 {
+				log.Printf("[%s] Error re-fetching link info for URL %s: %v", userIdentifier, originalLinkURL, err)
+				return
+			}
+
+			downloadURL := linkInfo.Tracks[0].URL
+			if linkInfo.Tracks[0].OriginalURL != "" {
+				downloadURL = linkInfo.Tracks[0].OriginalURL
+			}
+			if downloadURL == "" {
+				downloadURL = originalLinkURL
+			}
+
+			b.processDownloadRequest(chatID, originalLinkMessageID, downloadURL, dlType, linkInfo.Tracks[0], userName, userID, fromFirstName)
+			return
 		}
-		return
 	}
-
-	if len(parts) < 3 || parts[0] != "dltype" {
-		log.Printf("[%s] Invalid callback data format for single download: %s", userIdentifier, callback.Data)
-		return
-	}
-
-	originalLinkMessageID := 0
-	var originalLinkURL string
-
-	if callback.Message.ReplyToMessage != nil {
-		originalLinkMessageID = callback.Message.ReplyToMessage.MessageID
-		originalLinkURL = callback.Message.ReplyToMessage.Text
-	} else {
-		log.Printf("[%s] Callback query message does not have ReplyToMessage. Cannot determine original link.", userIdentifier)
-		return
-	}
-
-	if originalLinkURL == "" {
-		log.Printf("[%s] Original link URL is empty from ReplyToMessage.", userIdentifier)
-		return
-	}
-
-	b.api.Send(tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID))
-
-	chosenTypeStr := parts[1]
-	var dlType downloader.DownloadType
-	switch chosenTypeStr {
-	case "audio":
-		dlType = downloader.AudioOnly
-	case "video":
-		dlType = downloader.VideoBest
-	case "photo":
-		dlType = downloader.ImageBest
-	default:
-		log.Printf("[%s] Unknown download type in callback: %s", userIdentifier, chosenTypeStr)
-		return
-	}
-
-	log.Printf("[%s] User chose %s for URL: %s (Original MsgID: %d)", userIdentifier, chosenTypeStr, originalLinkURL, originalLinkMessageID)
-
-	linkInfo, err := b.downloader.GetLinkInfo(originalLinkURL, userIdentifier)
-	if err != nil || len(linkInfo.Tracks) == 0 {
-		log.Printf("[%s] Error re-fetching link info for URL %s: %v", userIdentifier, originalLinkURL, err)
-		return
-	}
-
-	downloadURL := linkInfo.Tracks[0].URL
-	if linkInfo.Tracks[0].OriginalURL != "" {
-		downloadURL = linkInfo.Tracks[0].OriginalURL
-	}
-	if downloadURL == "" {
-		downloadURL = originalLinkURL
-	}
-
-	b.processDownloadRequest(chatID, originalLinkMessageID, downloadURL, dlType, linkInfo.Tracks[0], userName, userID, fromFirstName)
 }
 
 type downloadedFile struct {
@@ -525,16 +577,16 @@ type downloadedFile struct {
 	TrackInfo *downloader.TrackInfo
 }
 
-func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdentifier string, userName string, userID int64, fromFirstName string, statusMessageID int) {
+func (b *Bot) processSoundCloudAlbum(chatID int64, urlToDownload string, userIdentifier string, userName string, userID int64, fromFirstName string, statusMessageID int) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[%s] RECOVERED from panic in processAlbumDownload: %v\n%s", userIdentifier, r, string(debug.Stack()))
+			log.Printf("[%s] RECOVERED from panic in processSoundCloudAlbum: %v\n%s", userIdentifier, r, string(debug.Stack()))
 			errorText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "❌ یک خطای داخلی بسیار جدی در حین دانلود آلبوم رخ داد و فرآیند متوقف شد.")
 			b.api.Send(tgbotapi.NewEditMessageText(chatID, statusMessageID, errorText))
 		}
 	}()
 
-	log.Printf("[%s] Starting album download process for URL: %s", userIdentifier, urlToDownload)
+	log.Printf("[%s] Starting SoundCloud album download process for URL: %s", userIdentifier, urlToDownload)
 	initialLinkInfo, err := b.downloader.GetLinkInfo(urlToDownload, userIdentifier)
 	if err != nil || initialLinkInfo.Type != "album" || len(initialLinkInfo.Tracks) == 0 {
 		log.Printf("[%s] Failed to get album info for batch download: %v", userIdentifier, err)
@@ -582,14 +634,6 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 
 			track := detailedLinkInfo.Tracks[0]
 
-			escapedTrackTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Title)
-			mu.Lock()
-			progressText = fmt.Sprintf("در حال دانلود آهنگ %d از %d\n*%s*", len(downloadedFiles)+1, totalTracks, escapedTrackTitle)
-			editMsg = tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
-			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
-			b.api.Send(editMsg)
-			mu.Unlock()
-
 			downloadedFilePath, _, err := b.downloader.DownloadMedia(trackURL, userIdentifier, downloader.AudioOnly, track)
 			if err != nil {
 				log.Printf("[%s] Failed to download track %s: %v", userIdentifier, track.Title, err)
@@ -598,6 +642,10 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 
 			mu.Lock()
 			downloadedFiles = append(downloadedFiles, downloadedFile{FilePath: downloadedFilePath, TrackInfo: track})
+			progressText = fmt.Sprintf("تعداد %d از %d آهنگ با موفقیت دانلود شد.", len(downloadedFiles), totalTracks)
+			editMsg = tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
+			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+			b.api.Send(editMsg)
 			mu.Unlock()
 
 		}(shallowTrack)
@@ -605,9 +653,6 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 
 	wg.Wait()
 
-	if len(downloadedFiles) < totalTracks {
-		log.Printf("[%s] Some tracks failed to download for album: %s. Downloaded %d of %d.", userIdentifier, urlToDownload, len(downloadedFiles), totalTracks)
-	}
 	if len(downloadedFiles) == 0 {
 		log.Printf("[%s] All tracks failed to download for album: %s", userIdentifier, urlToDownload)
 		errorText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "متاسفانه دانلود هیچ یک از آهنگ‌های آلبوم موفقیت‌آمیز نبود.")
@@ -645,6 +690,144 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 	log.Printf("[%s] Album download and send process finished for: %s", userIdentifier, urlToDownload)
 }
 
+func (b *Bot) processSpotifyAlbum(chatID int64, linkType string, linkID spotify.ID, userIdentifier string, userName string, userID int64, fromFirstName string, statusMessageID int) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[%s] RECOVERED from panic in processSpotifyAlbum: %v\n%s", userIdentifier, r, string(debug.Stack()))
+			errorText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "❌ یک خطای داخلی بسیار جدی در حین دانلود آلبوم اسپاتیفای رخ داد و فرآیند متوقف شد.")
+			b.api.Send(tgbotapi.NewEditMessageText(chatID, statusMessageID, errorText))
+		}
+	}()
+
+	var spotifyTracks []spotify.SimpleTrack
+	var collectionName string
+
+	if linkType == "album" {
+		album, err := b.spotify.GetAlbum(context.Background(), linkID)
+		if err != nil {
+			log.Printf("[%s] Failed to re-fetch Spotify album info: %v", userIdentifier, err)
+			return
+		}
+		spotifyTracks = album.Tracks.Tracks
+		collectionName = album.Name
+	} else if linkType == "playlist" {
+		playlist, err := b.spotify.GetPlaylist(context.Background(), linkID)
+		if err != nil {
+			log.Printf("[%s] Failed to re-fetch Spotify playlist info: %v", userIdentifier, err)
+			return
+		}
+		for _, item := range playlist.Tracks.Tracks {
+			spotifyTracks = append(spotifyTracks, item.Track.SimpleTrack)
+		}
+		collectionName = playlist.Name
+	}
+
+	if len(spotifyTracks) == 0 {
+		log.Printf("[%s] No tracks found in Spotify album/playlist %s", userIdentifier, linkID)
+		return
+	}
+
+	totalTracks := len(spotifyTracks)
+	log.Printf("[%s] Starting Spotify album download. Album: %s, Tracks: %d", userIdentifier, collectionName, totalTracks)
+
+	var downloadedFiles []downloadedFile
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := semaphore.NewWeighted(3)
+
+	for i, sTrack := range spotifyTracks {
+		wg.Add(1)
+		sem.Acquire(context.Background(), 1)
+
+		go func(trackIndex int, spotifyTrack spotify.SimpleTrack) {
+			defer wg.Done()
+			defer sem.Release(1)
+
+			var artists []string
+			for _, artist := range spotifyTrack.Artists {
+				artists = append(artists, artist.Name)
+			}
+			artistStr := strings.Join(artists, ", ")
+			searchQuery := fmt.Sprintf("%s - %s", artistStr, spotifyTrack.Name)
+
+			mu.Lock()
+			progressText := fmt.Sprintf("در حال جستجوی آهنگ %d از %d:\n*%s*", trackIndex+1, totalTracks, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, spotifyTrack.Name))
+			editMsg := tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
+			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+			b.api.Send(editMsg)
+			mu.Unlock()
+
+			foundURL, err := b.downloader.FindYouTubeURL(searchQuery, userIdentifier)
+			if err != nil {
+				log.Printf("[%s] Could not find on YouTube, trying SoundCloud... Query: '%s'", userIdentifier, searchQuery)
+				foundURL, err = b.downloader.FindSoundCloudURL(searchQuery, userIdentifier)
+				if err != nil {
+					log.Printf("[%s] Could not find '%s' on any platform. Skipping.", userIdentifier, searchQuery)
+					return
+				}
+			}
+
+			trackInfo := &downloader.TrackInfo{
+				Title:       spotifyTrack.Name,
+				Artist:      artistStr,
+				OriginalURL: string(spotifyTrack.ExternalURLs["spotify"]),
+			}
+
+			downloadedFilePath, _, err := b.downloader.DownloadMedia(foundURL, userIdentifier, downloader.AudioOnly, trackInfo)
+			if err != nil {
+				log.Printf("[%s] Failed to download track %s from found URL %s: %v", userIdentifier, trackInfo.Title, foundURL, err)
+				return
+			}
+
+			mu.Lock()
+			downloadedFiles = append(downloadedFiles, downloadedFile{FilePath: downloadedFilePath, TrackInfo: trackInfo})
+			mu.Unlock()
+
+		}(i, sTrack)
+	}
+
+	wg.Wait()
+
+	if len(downloadedFiles) < totalTracks {
+		log.Printf("[%s] Some tracks failed to download for album: %s. Downloaded %d of %d.", userIdentifier, collectionName, len(downloadedFiles), totalTracks)
+	}
+
+	if len(downloadedFiles) == 0 {
+		errorText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "متاسفانه دانلود هیچ یک از آهنگ‌های آلبوم اسپاتیفای موفقیت‌آمیز نبود.")
+		b.api.Send(tgbotapi.NewEditMessageText(chatID, statusMessageID, errorText))
+		return
+	}
+
+	b.api.Send(tgbotapi.NewDeleteMessage(chatID, statusMessageID))
+	log.Printf("[%s] All %d Spotify tracks downloaded. Now sending as media group(s).", userIdentifier, len(downloadedFiles))
+
+	chunkSize := 10
+	for i := 0; i < len(downloadedFiles); i += chunkSize {
+		end := i + chunkSize
+		if end > len(downloadedFiles) {
+			end = len(downloadedFiles)
+		}
+		chunk := downloadedFiles[i:end]
+
+		mediaGroup := []interface{}{}
+		for _, file := range chunk {
+			audioFile := tgbotapi.NewInputMediaAudio(tgbotapi.FilePath(file.FilePath))
+			audioFile.Title = file.TrackInfo.Title
+			audioFile.Performer = file.TrackInfo.Artist
+			mediaGroup = append(mediaGroup, audioFile)
+		}
+
+		if _, err := b.api.SendMediaGroup(tgbotapi.NewMediaGroup(chatID, mediaGroup)); err != nil {
+			log.Printf("[%s] Error sending spotify media group chunk %d: %v", userIdentifier, i/chunkSize+1, err)
+		}
+	}
+
+	for _, file := range downloadedFiles {
+		os.Remove(file.FilePath)
+	}
+	log.Printf("[%s] Spotify album download and send process finished for album: %s", userIdentifier, collectionName)
+}
+
 func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, urlToDownload string, dlType downloader.DownloadType, trackInfo *downloader.TrackInfo, userName string, userID int64, fromFirstName string) {
 	userIdentifier := userName + "_" + strconv.FormatInt(userID, 10)
 	escapedArtist := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, trackInfo.Artist)
@@ -654,8 +837,7 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 	var sentMsg tgbotapi.Message
 	var err error
 
-	if dlType == downloader.AudioOnly && originalLinkMessageID == 0 {
-	} else {
+	if !(dlType == downloader.AudioOnly && originalLinkMessageID == 0) {
 		downloadingMsgText := ""
 		if trackInfo.Title != "Unknown Title" && trackInfo.Artist != "Unknown Artist" {
 			downloadingMsgText = fmt.Sprintf("در حال آماده‌سازی و دانلود *%s* برای:\n`%s \\- %s`\n\nاین فرآیند ممکن است کمی طول بکشد، لطفاً صبور باشید\\.\\.\\. ⏳", escapedFileType, escapedArtist, escapedTitle)
