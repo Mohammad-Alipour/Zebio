@@ -239,10 +239,10 @@ func (d *Downloader) FindYouTubeURL(query string, username string) (string, erro
 
 func (d *Downloader) FindSoundCloudURL(query string, username string) (string, error) {
 	log.Printf("[%s] Searching on SoundCloud for: %s", username, query)
-	cmd := exec.Command(d.ytDLPPath, "--get-url", fmt.Sprintf("scsearch1:%s", query))
+	cmd := exec.Command(d.ytDLPPath, "-J", "--no-playlist", fmt.Sprintf("scsearch1:%s", query))
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var jsonData, stderr bytes.Buffer
+	cmd.Stdout = &jsonData
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
@@ -250,9 +250,16 @@ func (d *Downloader) FindSoundCloudURL(query string, username string) (string, e
 		return "", fmt.Errorf("could not find a soundcloud track for query '%s': %w", query, err)
 	}
 
-	soundcloudURL := strings.TrimSpace(stdout.String())
+	var data struct {
+		WebpageURL string `json:"webpage_url"`
+	}
+	if err := json.Unmarshal(jsonData.Bytes(), &data); err != nil {
+		return "", fmt.Errorf("could not parse soundcloud search result: %w", err)
+	}
+
+	soundcloudURL := strings.TrimSpace(data.WebpageURL)
 	if soundcloudURL == "" {
-		return "", fmt.Errorf("yt-dlp SoundCloud search returned an empty URL for query '%s'", query)
+		return "", fmt.Errorf("yt-dlp SoundCloud search returned an empty webpage_url for query '%s'", query)
 	}
 
 	log.Printf("[%s] SoundCloud search found URL: %s", username, soundcloudURL)
