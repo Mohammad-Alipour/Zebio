@@ -289,7 +289,7 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 		artists = append(artists, artist.Name)
 	}
 	artistStr := strings.Join(artists, ", ")
-	searchQuery := fmt.Sprintf("%s %s", artistStr, track.Name)
+	searchQuery := fmt.Sprintf("%s - %s", artistStr, track.Name)
 
 	b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ اطلاعات آهنگ دریافت شد. در حال جستجوی آهنگ در یوتیوب...")))
 
@@ -309,11 +309,17 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 		b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
 	}
 
-	log.Printf("[%s] Found media URL: %s. Now passing to handleLink to present options.", userIdentifier, foundURL)
+	log.Printf("[%s] Found media URL: %s. Now processing download directly.", userIdentifier, foundURL)
 
-	newMessage := *message
-	newMessage.Text = foundURL
-	b.handleLink(&newMessage, userName, userID, fromFirstName)
+	spotifyTrackInfo := &downloader.TrackInfo{
+		Title:       track.Name,
+		Artist:      artistStr,
+		OriginalURL: message.Text,
+		URL:         foundURL,
+		IsAudioOnly: true,
+	}
+
+	go b.processDownloadRequest(chatID, message.MessageID, foundURL, downloader.AudioOnly, spotifyTrackInfo, userName, userID, fromFirstName)
 }
 
 func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int64, fromFirstName string) {
@@ -561,6 +567,13 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 				return
 			}
 
+			mu.Lock()
+			progressText := fmt.Sprintf("در حال دریافت اطلاعات آهنگ %d از %d...", len(downloadedFiles)+1, totalTracks)
+			editMsg := tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
+			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
+			b.api.Send(editMsg)
+			mu.Unlock()
+
 			detailedLinkInfo, err := b.downloader.GetLinkInfo(trackURL, userIdentifier)
 			if err != nil || len(detailedLinkInfo.Tracks) == 0 {
 				log.Printf("[%s] Failed to fetch detailed info for track (%s): %v. Skipping.", userIdentifier, trackURL, err)
@@ -569,9 +582,10 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 
 			track := detailedLinkInfo.Tracks[0]
 
+			escapedTrackTitle := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Title)
 			mu.Lock()
-			progressText := fmt.Sprintf("در حال دانلود آهنگ %d از %d\n*%s*", len(downloadedFiles)+1, totalTracks, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, track.Title))
-			editMsg := tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
+			progressText = fmt.Sprintf("در حال دانلود آهنگ %d از %d\n*%s*", len(downloadedFiles)+1, totalTracks, escapedTrackTitle)
+			editMsg = tgbotapi.NewEditMessageText(chatID, statusMessageID, progressText)
 			editMsg.ParseMode = tgbotapi.ModeMarkdownV2
 			b.api.Send(editMsg)
 			mu.Unlock()
