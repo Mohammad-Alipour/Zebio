@@ -259,15 +259,24 @@ func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, user
 	processingMsg.ReplyToMessageID = message.MessageID
 	sentPInfoMsg, _ := b.api.Send(processingMsg)
 
-	re := regexp.MustCompile(`/track/([a-zA-Z0-9]+)`)
+	re := regexp.MustCompile(`/(track|album|playlist)/([a-zA-Z0-9]+)`)
 	matches := re.FindStringSubmatch(message.Text)
-	if len(matches) < 2 {
-		log.Printf("[%s] Could not parse Spotify track ID from URL: %s", userIdentifier, message.Text)
-		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا: لینک اسپاتیفای معتبر به نظر نمی‌رسد یا از نوع آهنگ (track) نیست."))
+	if len(matches) < 3 {
+		log.Printf("[%s] Could not parse Spotify link type/ID from URL: %s", userIdentifier, message.Text)
+		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا: لینک اسپاتیفای معتبر به نظر نمی‌رسد."))
 		return
 	}
-	trackID := spotify.ID(matches[1])
 
+	linkType := matches[1]
+	linkID := matches[2]
+
+	if linkType != "track" {
+		log.Printf("[%s] Spotify link type '%s' is not supported yet.", userIdentifier, linkType)
+		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "در حال حاضر فقط لینک آهنگ (track) از اسپاتیفای پشتیبانی می‌شود."))
+		return
+	}
+
+	trackID := spotify.ID(linkID)
 	track, err := b.spotify.GetTrack(context.Background(), trackID)
 	if err != nil {
 		log.Printf("[%s] Could not get track info from Spotify API: %v", userIdentifier, err)
