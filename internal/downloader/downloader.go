@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -98,11 +99,14 @@ func New(cfg *config.Config) (*Downloader, error) {
 func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, error) {
 	log.Printf("[%s] Fetching link info for URL: %s\n", username, urlStr)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	if strings.Contains(urlStr, "soundcloud.com") && (strings.Contains(urlStr, "/sets/") || strings.Contains(urlStr, "/playlists/")) {
-		cmd = exec.Command(d.ytDLPPath, "-J", "-i", "--flat-playlist", urlStr)
+		cmd = exec.CommandContext(ctx, d.ytDLPPath, "-J", "-i", "--flat-playlist", urlStr)
 	} else {
-		cmd = exec.Command(d.ytDLPPath, "-J", "-i", "--no-playlist", urlStr)
+		cmd = exec.CommandContext(ctx, d.ytDLPPath, "-J", "-i", "--no-playlist", urlStr)
 	}
 
 	var jsonData bytes.Buffer
@@ -115,6 +119,9 @@ func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, err
 		log.Printf("[%s] yt-dlp (info) STDERR for %s:\n%s\n", username, urlStr, stderrBuf.String())
 	}
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("yt-dlp command timed out for getting info from %s", urlStr)
+		}
 		if _, ok := err.(*exec.ExitError); !ok {
 			return nil, fmt.Errorf("[%s] failed to run yt-dlp for %s: %w", username, urlStr, err)
 		}
@@ -217,13 +224,19 @@ func parseTrackInfoFromData(data ytdlpJSONEntry) *TrackInfo {
 
 func (d *Downloader) FindYouTubeURL(query string, username string) (string, error) {
 	log.Printf("[%s] Searching on YouTube for: %s", username, query)
-	cmd := exec.Command(d.ytDLPPath, "--get-url", fmt.Sprintf("ytsearch1:%s", query))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, d.ytDLPPath, "--get-url", fmt.Sprintf("ytsearch1:%s", query))
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("yt-dlp Youtube timed out for query: %s", query)
+		}
 		log.Printf("[%s] yt-dlp Youtube failed. STDERR: %s", username, stderr.String())
 		return "", fmt.Errorf("could not find a youtube video for query '%s': %w", query, err)
 	}
@@ -239,13 +252,19 @@ func (d *Downloader) FindYouTubeURL(query string, username string) (string, erro
 
 func (d *Downloader) FindSoundCloudURL(query string, username string) (string, error) {
 	log.Printf("[%s] Searching on SoundCloud for: %s", username, query)
-	cmd := exec.Command(d.ytDLPPath, "-J", "--no-playlist", fmt.Sprintf("scsearch1:%s", query))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, d.ytDLPPath, "-J", "--no-playlist", fmt.Sprintf("scsearch1:%s", query))
 
 	var jsonData, stderr bytes.Buffer
 	cmd.Stdout = &jsonData
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("yt-dlp SoundCloud search timed out for query: %s", query)
+		}
 		log.Printf("[%s] yt-dlp SoundCloud search failed. STDERR: %s", username, stderr.String())
 		return "", fmt.Errorf("could not find a soundcloud track for query '%s': %w", query, err)
 	}
@@ -272,6 +291,9 @@ func (d *Downloader) FindSoundCloudURL(query string, username string) (string, e
 func (d *Downloader) DownloadMedia(urlStr string, username string, prefType DownloadType, info *TrackInfo) (string, string, error) {
 	log.Printf("[%s] Starting download for URL: %s (Title: %s, Preferred Type: %v)\n", username, urlStr, info.Title, prefType)
 	start := time.Now()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 
 	var cmdArgs []string
 	outputFilename := fmt.Sprintf("%s - %s", info.Artist, info.Title)
@@ -307,7 +329,7 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 		return "", "", fmt.Errorf("[%s] unknown download type requested", username)
 	}
 
-	cmd := exec.Command(d.ytDLPPath, cmdArgs...)
+	cmd := exec.CommandContext(ctx, d.ytDLPPath, cmdArgs...)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
@@ -324,6 +346,9 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 	}
 
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", "", fmt.Errorf("yt-dlp download timed out for %s", urlStr)
+		}
 		return "", "", fmt.Errorf("[%s] yt-dlp download execution failed: %w. STDERR: %s", username, err, stderrBuf.String())
 	}
 
