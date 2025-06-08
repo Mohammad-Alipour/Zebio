@@ -99,7 +99,7 @@ func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, err
 	log.Printf("[%s] Fetching link info for URL: %s\n", username, urlStr)
 
 	var cmd *exec.Cmd
-	if strings.Contains(urlStr, "soundcloud.com") {
+	if strings.Contains(urlStr, "soundcloud.com") && (strings.Contains(urlStr, "/sets/") || strings.Contains(urlStr, "/playlists/")) {
 		cmd = exec.Command(d.ytDLPPath, "-J", "-i", "--flat-playlist", urlStr)
 	} else {
 		cmd = exec.Command(d.ytDLPPath, "-J", "-i", "--no-playlist", urlStr)
@@ -125,35 +125,35 @@ func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, err
 	}
 
 	var output ytdlpPlaylistJSON
-	if err := json.Unmarshal(jsonData.Bytes(), &output); err != nil {
-		return nil, fmt.Errorf("[%s] failed to unmarshal yt-dlp JSON for %s: %w", username, urlStr, err)
-	}
-
-	linkInfo := &LinkInfo{}
-	if output.Type == "playlist" {
-		linkInfo.Type = "album"
-		linkInfo.Title = output.Title
-		linkInfo.Uploader = output.Uploader
-		linkInfo.OriginalURL = output.WebpageURL
+	if err := json.Unmarshal(jsonData.Bytes(), &output); err == nil && output.Type == "playlist" {
+		linkInfo := &LinkInfo{
+			Type:        "album",
+			Title:       output.Title,
+			Uploader:    output.Uploader,
+			OriginalURL: output.WebpageURL,
+		}
 		for _, entryData := range output.Entries {
 			track := parseTrackInfoFromData(entryData)
 			linkInfo.Tracks = append(linkInfo.Tracks, track)
 		}
 		log.Printf("[%s] Album/Playlist info fetched: Title: '%s', Track Count: %d\n", username, linkInfo.Title, len(linkInfo.Tracks))
-	} else {
-		var singleEntry ytdlpJSONEntry
-		if err := json.Unmarshal(jsonData.Bytes(), &singleEntry); err != nil {
-			return nil, fmt.Errorf("[%s] failed to unmarshal single track JSON for %s: %w", username, urlStr, err)
-		}
-		track := parseTrackInfoFromData(singleEntry)
-		linkInfo.Type = "track"
-		linkInfo.Title = track.Title
-		linkInfo.Uploader = track.Artist
-		linkInfo.OriginalURL = track.OriginalURL
-		linkInfo.Tracks = append(linkInfo.Tracks, track)
-		log.Printf("[%s] Single track info fetched: Title: '%s', Artist: '%s'\n", username, track.Title, track.Artist)
+		return linkInfo, nil
 	}
 
+	var singleEntry ytdlpJSONEntry
+	if err := json.Unmarshal(jsonData.Bytes(), &singleEntry); err != nil {
+		return nil, fmt.Errorf("[%s] failed to unmarshal yt-dlp JSON for %s: %w", username, urlStr, err)
+	}
+
+	track := parseTrackInfoFromData(singleEntry)
+	linkInfo := &LinkInfo{
+		Type:        "track",
+		Title:       track.Title,
+		Uploader:    track.Artist,
+		OriginalURL: track.OriginalURL,
+		Tracks:      []*TrackInfo{track},
+	}
+	log.Printf("[%s] Single track info fetched: Title: '%s', Artist: '%s'\n", username, track.Title, track.Artist)
 	return linkInfo, nil
 }
 
@@ -212,8 +212,29 @@ func parseTrackInfoFromData(data ytdlpJSONEntry) *TrackInfo {
 	if !info.HasVideo && !info.HasImage && data.Acodec != "none" && data.Acodec != "" {
 		info.IsAudioOnly = true
 	}
-
 	return info
+}
+
+func (d *Downloader) FindYouTubeURL(query string, username string) (string, error) {
+	log.Printf("[%s] Searching on YouTube for: %s", username, query)
+	cmd := exec.Command(d.ytDLPPath, "--get-url", fmt.Sprintf("ytsearch1:%s", query))
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		log.Printf("[%s] yt-dlp search failed. STDERR: %s", username, stderr.String())
+		return "", fmt.Errorf("could not find a youtube video for query '%s': %w", query, err)
+	}
+
+	youtubeURL := strings.TrimSpace(stdout.String())
+	if youtubeURL == "" {
+		return "", fmt.Errorf("yt-dlp search returned an empty URL for query '%s'", query)
+	}
+
+	log.Printf("[%s] Youtube found URL: %s", username, youtubeURL)
+	return youtubeURL, nil
 }
 
 func (d *Downloader) DownloadMedia(urlStr string, username string, prefType DownloadType, info *TrackInfo) (string, string, error) {
@@ -225,7 +246,7 @@ func (d *Downloader) DownloadMedia(urlStr string, username string, prefType Down
 	outputTemplateBase := filepath.Join(d.downloadDir, outputFilename)
 
 	downloadURL := urlStr
-	if info.URL != "" {
+	if prefType != ImageBest && info.URL != "" {
 		downloadURL = info.URL
 	}
 

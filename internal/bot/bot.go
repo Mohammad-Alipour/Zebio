@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/Mohammad-Alipour/Zebio/internal/downloader"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/zmb3/spotify/v2"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -21,9 +23,10 @@ type Bot struct {
 	api        *tgbotapi.BotAPI
 	cfg        *config.Config
 	downloader *downloader.Downloader
+	spotify    *spotify.Client
 }
 
-func New(cfg *config.Config, dl *downloader.Downloader) (*Bot, error) {
+func New(cfg *config.Config, dl *downloader.Downloader, sp *spotify.Client) (*Bot, error) {
 	if cfg.TelegramBotToken == "" {
 		log.Fatal("Telegram Bot Token is not configured. Cannot start bot.")
 	}
@@ -36,6 +39,7 @@ func New(cfg *config.Config, dl *downloader.Downloader) (*Bot, error) {
 		api:        api,
 		cfg:        cfg,
 		downloader: dl,
+		spotify:    sp,
 	}, nil
 }
 
@@ -199,7 +203,11 @@ func (b *Bot) Start() {
 		} else if update.Message.IsCommand() {
 			b.handleCommand(update.Message, fromFirstName)
 		} else if update.Message.Text != "" {
-			b.handleLink(update.Message, userName, userID, fromFirstName)
+			if strings.Contains(update.Message.Text, "spotify.com") {
+				b.handleSpotifyLink(update.Message, userName, userID, fromFirstName)
+			} else {
+				b.handleLink(update.Message, userName, userID, fromFirstName)
+			}
 		} else {
 			log.Printf("[%s (%d)] Received non-text, non-command message. Ignoring.", userName, userID)
 		}
@@ -232,6 +240,62 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, fromFirstName string) {
 	if _, err := b.api.Send(reply); err != nil {
 		log.Printf("[%s (%d)] Error sending command reply: %v", userName, message.From.ID, err)
 	}
+}
+
+func (b *Bot) handleSpotifyLink(message *tgbotapi.Message, userName string, userID int64, fromFirstName string) {
+	chatID := message.Chat.ID
+	userIdentifier := userName + "_" + strconv.FormatInt(userID, 10)
+	log.Printf("[%s] Received Spotify link: %s", userIdentifier, message.Text)
+
+	if b.spotify == nil {
+		log.Printf("[%s] Spotify feature is disabled because client is not configured.", userIdentifier)
+		errMsg := tgbotapi.NewMessage(chatID, "قابلیت اسپاتیفای در حال حاضر فعال نیست.")
+		errMsg.ReplyToMessageID = message.MessageID
+		b.api.Send(errMsg)
+		return
+	}
+
+	processingMsg := tgbotapi.NewMessage(chatID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "🔗 لینک اسپاتیفای دریافت شد. در حال پردازش..."))
+	processingMsg.ReplyToMessageID = message.MessageID
+	sentPInfoMsg, _ := b.api.Send(processingMsg)
+
+	re := regexp.MustCompile(`/track/([a-zA-Z0-9]+)`)
+	matches := re.FindStringSubmatch(message.Text)
+	if len(matches) < 2 {
+		log.Printf("[%s] Could not parse Spotify track ID from URL: %s", userIdentifier, message.Text)
+		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا: لینک اسپاتیفای معتبر به نظر نمی‌رسد یا از نوع آهنگ (track) نیست."))
+		return
+	}
+	trackID := spotify.ID(matches[1])
+
+	track, err := b.spotify.GetTrack(context.Background(), trackID)
+	if err != nil {
+		log.Printf("[%s] Could not get track info from Spotify API: %v", userIdentifier, err)
+		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "خطا در دریافت اطلاعات از API اسپاتیفای."))
+		return
+	}
+
+	var artists []string
+	for _, artist := range track.Artists {
+		artists = append(artists, artist.Name)
+	}
+	artistStr := strings.Join(artists, ", ")
+	searchQuery := fmt.Sprintf("%s - %s", artistStr, track.Name)
+
+	b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "✅ اطلاعات آهنگ دریافت شد. در حال جستجوی آهنگ در یوتیوب...")))
+
+	youtubeURL, err := b.downloader.FindYouTubeURL(searchQuery, userIdentifier)
+	if err != nil {
+		log.Printf("[%s] Could not find YouTube URL for query '%s': %v", userIdentifier, searchQuery, err)
+		b.api.Send(tgbotapi.NewEditMessageText(chatID, sentPInfoMsg.MessageID, "متاسفانه آهنگ مورد نظر در یوتیوب پیدا نشد."))
+		return
+	}
+
+	log.Printf("[%s] Found YouTube URL: %s. Now passing to handleLink.", userIdentifier, youtubeURL)
+	b.api.Send(tgbotapi.NewDeleteMessage(chatID, sentPInfoMsg.MessageID))
+
+	message.Text = youtubeURL
+	b.handleLink(message, userName, userID, fromFirstName)
 }
 
 func (b *Bot) handleLink(message *tgbotapi.Message, userName string, userID int64, fromFirstName string) {
@@ -509,6 +573,9 @@ func (b *Bot) processAlbumDownload(chatID int64, urlToDownload string, userIdent
 
 	wg.Wait()
 
+	if len(downloadedFiles) < totalTracks {
+		log.Printf("[%s] Some tracks failed to download for album: %s. Downloaded %d of %d.", userIdentifier, urlToDownload, len(downloadedFiles), totalTracks)
+	}
 	if len(downloadedFiles) == 0 {
 		log.Printf("[%s] All tracks failed to download for album: %s", userIdentifier, urlToDownload)
 		errorText := tgbotapi.EscapeText(tgbotapi.ModeMarkdownV2, "متاسفانه دانلود هیچ یک از آهنگ‌های آلبوم موفقیت‌آمیز نبود.")
@@ -599,13 +666,13 @@ func (b *Bot) processDownloadRequest(chatID int64, originalLinkMessageID int, ur
 	if dlType == downloader.AudioOnly || actualExt == "mp3" {
 		caption := fmt.Sprintf("🎵 *%s*\n👤 _%s_\n\n%s", escapedTitle, escapedArtist, escapedBotUsernameMention)
 		audioFile := tgbotapi.NewAudio(chatID, tgbotapi.FilePath(downloadedFilePath))
+		if originalLinkMessageID != 0 {
+			audioFile.ReplyToMessageID = originalLinkMessageID
+		}
 		audioFile.Title = trackInfo.Title
 		audioFile.Performer = trackInfo.Artist
 		audioFile.Caption = caption
 		audioFile.ParseMode = tgbotapi.ModeMarkdownV2
-		if originalLinkMessageID != 0 {
-			audioFile.ReplyToMessageID = originalLinkMessageID
-		}
 		_, sendErr := b.api.Send(audioFile)
 		if sendErr != nil {
 			log.Printf("[%s] Error sending audio file %s: %v\n", userIdentifier, downloadedFilePath, sendErr)
