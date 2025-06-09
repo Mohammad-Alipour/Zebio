@@ -104,7 +104,7 @@ func (d *Downloader) GetLinkInfo(urlStr string, username string) (*LinkInfo, err
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	baseArgs := []string{"-J", "-i"}
+	baseArgs := []string{"-J"}
 	if d.youTubeCookiesPath != "" && strings.Contains(urlStr, "youtu") {
 		baseArgs = append(baseArgs, "--cookies", d.youTubeCookiesPath)
 	}
@@ -239,7 +239,7 @@ func (d *Downloader) FindYouTubeURL(query string, username string) (string, erro
 	if d.youTubeCookiesPath != "" {
 		args = append(args, "--cookies", d.youTubeCookiesPath)
 	}
-	args = append(args, "--get-url", fmt.Sprintf("ytsearch1:%s", query))
+	args = append(args, "--get-url", fmt.Sprintf("ytsearch1:\"%s\"", query))
 
 	cmd := exec.CommandContext(ctx, d.ytDLPPath, args...)
 
@@ -269,7 +269,7 @@ func (d *Downloader) FindSoundCloudURL(query string, username string) (string, e
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, d.ytDLPPath, "-J", "--no-playlist", fmt.Sprintf("scsearch1:%s", query))
+	cmd := exec.CommandContext(ctx, d.ytDLPPath, "-J", "--no-playlist", fmt.Sprintf("scsearch1:\"%s\"", query))
 
 	var jsonData, stderr bytes.Buffer
 	cmd.Stdout = &jsonData
